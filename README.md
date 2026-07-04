@@ -24,13 +24,28 @@ A premium, highly customizable, and fully featured Flutter plugin for creating s
 
 ## 🚀 Getting Started
 
-### 1. Add Android Permissions
+### 1. Add Android Configuration
 
-Add the following permission inside your client app's `android/app/src/main/AndroidManifest.xml`:
+Add the following permissions and service declaration inside your client app's `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
+<!-- Required permissions -->
 <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+<!-- Add inside the <application> tag -->
+<service
+    android:name="hq.floating.bubble.HQFloatingService"
+    android:enabled="true"
+    android:exported="false"
+    android:foregroundServiceType="specialUse">
+    <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Floating bubble window overlay service" />
+</service>
 ```
+
 
 ### 2. Basic Setup and Initialize
 
@@ -164,17 +179,32 @@ await HQFloatingService().setWakeLock(false);
 
 ## 🚀 بدء الاستخدام
 
-### 1. إضافة صلاحيات الأندرويد
+### 1. إعدادات الأندرويد (AndroidManifest.xml)
 
-أضف الصلاحية التالية داخل ملف `AndroidManifest.xml` الخاص بتطبيقك:
+أضف الصلاحيات وتعريف الخدمة التالية داخل ملف `AndroidManifest.xml` الخاص بتطبيقك:
 
 <div dir="ltr">
 
 ```xml
+<!-- Required permissions -->
 <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+<!-- Add inside the <application> tag -->
+<service
+    android:name="hq.floating.bubble.HQFloatingService"
+    android:enabled="true"
+    android:exported="false"
+    android:foregroundServiceType="specialUse">
+    <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Floating bubble window overlay service" />
+</service>
 ```
 
 </div>
+
 
 ### 2. التثبيت والتهيئة
 
