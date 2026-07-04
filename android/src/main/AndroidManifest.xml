@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  package="hq.floating.bubble">
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <application>
+        <service android:name=".HQFloatingService" android:exported="false" />
+    </application>
+</manifest>
