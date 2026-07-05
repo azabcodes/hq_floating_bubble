@@ -143,6 +143,15 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
   }
 
   override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
+    if (call.method.startsWith("window.") || call.method.startsWith("service.") || call.method == "data.share") {
+      if (HQFloatingService.instance != null) {
+        HQFloatingService.instance!!.onMethodCall(call, result)
+      } else {
+        result.error("SERVICE_NOT_RUNNING", "Floating service is not running", null)
+      }
+      return
+    }
+
     when (call.method) {
       "plugin.initialize" -> {
         // the main engine should call initialize?
@@ -194,18 +203,6 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
       }
       "plugin.sync_windows" -> {
         return result.success(HQFloatingService.instance?.windows?.map { it.value.toMap() })
-      }
-      "window.sync" -> {
-        Log.d(TAG, "[plugin] fake window.sync")
-        return result.success(null)
-      }
-      "service.promote", "service.demote", "service.set_wakelock", "service.stop_service" -> {
-        if (HQFloatingService.instance != null) {
-          HQFloatingService.instance!!.onMethodCall(call, result)
-        } else {
-          result.error("SERVICE_NOT_RUNNING", "Floating service is not running", null)
-        }
-        return
       }
       else -> {
         Log.d(TAG, "[plugin] method ${call.method} not implement")

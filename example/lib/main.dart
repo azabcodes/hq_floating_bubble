@@ -121,11 +121,12 @@ class _HomePageState extends State<HomePage> {
     for (var c in widget.configs) {
       _windows.add(c.to());
     }
-    HQFloatingService().initialize();
     initAsyncState();
   }
 
   Future<void> initAsyncState() async {
+    await HQFloatingService().initialize();
+    
     var p1 = await HQFloatingService().checkPermission();
     var p2 = await HQFloatingService().isServiceRunning();
 
@@ -135,10 +136,10 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (!p2) {
-      HQFloatingService().startService();
+      await HQFloatingService().startService();
     }
 
-    _createWindows();
+    await _createWindows();
 
     setState(() {
       _ready = true;
@@ -154,10 +155,12 @@ class _HomePageState extends State<HomePage> {
       }
     });
 
-    for (var w in _windows) {
+    for (int i = 0; i < _windows.length; i++) {
+      var w = _windows[i];
       var _w = HQFloatingService().windows[w.id];
       if (null != _w) {
-        _readys[w] = true;
+        _windows[i] = _w;
+        _readys[_w] = true;
         continue;
       }
       w.on(HQFloatingEventType.WindowCreated, (window, data) {
