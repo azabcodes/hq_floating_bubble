@@ -28,7 +28,7 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
   private lateinit var mActivity: Activity
   private lateinit var channel : MethodChannel
   private lateinit var engine: FlutterEngine
-  private lateinit var waitPermissionResult: Result
+  private var waitPermissionResult: Result? = null
 
   private var serviceChannelInstalled = false
   private var isMain = false
@@ -222,20 +222,24 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
   }
 
   override fun onDetachedFromActivityForConfigChanges() {
-
+    HQFloatingService.activityRef?.clear()
+    HQFloatingService.activityRef = null
   }
 
   override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
     mActivity = binding.activity
+    HQFloatingService.onActivityAttached(mActivity)
   }
 
   override fun onDetachedFromActivity() {
-
+    HQFloatingService.activityRef?.clear()
+    HQFloatingService.activityRef = null
   }
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
     if (requestCode == ALERT_WINDOW_PERMISSION) {
-      waitPermissionResult.success(permissionGiven(mContext))
+      waitPermissionResult?.success(permissionGiven(mContext))
+      waitPermissionResult = null
       return true
     }
     return false

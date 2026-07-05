@@ -41,7 +41,7 @@ class HQFloatingWindow(
 
     var wm = wmr
 
-    var subscribedEvents: HashMap<String, Boolean> = HashMap()
+    var subscribedEvents: MutableMap<String, Boolean> = mutableMapOf()
 
     var view: FlutterView = FlutterView(context, FlutterTextureView(context))
 
@@ -82,7 +82,9 @@ class HQFloatingWindow(
         Log.i(TAG, "[window] destroy window: $key force: $force")
 
         // remote from manager must be first
-        if (_started) wm.removeView(view)
+        try {
+            if (_started) wm.removeView(view)
+        } catch (_: Exception) {}
 
         view.detachFromFlutterEngine()
 
@@ -91,6 +93,7 @@ class HQFloatingWindow(
         if (force) {
             // stop engine and remove from cache
             FlutterEngineCache.getInstance().remove(engineKey)
+            service.createdEngineKeys.remove(engineKey)
             engine.destroy()
             service.windows.remove(key)
             emit("destroy", null)
@@ -105,6 +108,7 @@ class HQFloatingWindow(
     fun setVisible(visible: Boolean = true): Boolean {
         Log.d(TAG, "[window] set window $key => $visible")
         emit("visible", visible)
+        view.animate().cancel()
         if (visible) {
             view.visibility = View.VISIBLE
             view.alpha = 0f
@@ -182,14 +186,14 @@ class HQFloatingWindow(
         // Log.i(TAG, "[window] emit event: HQFloatingWindow[$key] $name ")
 
         // check if need to send to my self
-        if (true||subscribedEvents.containsKey(name)||subscribedEvents.containsKey("*")) {
+        if (subscribedEvents.containsKey(name) || subscribedEvents.containsKey("*")) {
             // emit to window engine
             simpleEmit(_message, evtName, data)
         }
 
         // plugin
         // check if we need to fire to plugin
-        if (pluginNeed&&(true||service.subscribedEvents.containsKey("*")||service.subscribedEvents.containsKey(evtName))) {
+        if (pluginNeed && (service.subscribedEvents.containsKey("*") || service.subscribedEvents.containsKey(evtName))) {
             simpleEmit(service._message, evtName, data)
         }
 
@@ -330,6 +334,7 @@ class HQFloatingWindow(
 
     // window is dragging
     private var dragging = false
+    private var lastDragEmitTime = 0L
 
     // start point
     private var lastX = 0f
@@ -337,6 +342,50 @@ class HQFloatingWindow(
 
     // border around
     // TODO: support generate around edge
+
+    private fun getInterpolator(curveName: String?): android.view.animation.Interpolator {
+        return when (curveName?.lowercase()) {
+            "accelerate" -> android.view.animation.AccelerateInterpolator()
+            "bounce" -> android.view.animation.BounceInterpolator()
+            "overshoot" -> android.view.animation.OvershootInterpolator()
+            "linear" -> android.view.animation.LinearInterpolator()
+            else -> android.view.animation.DecelerateInterpolator()
+        }
+    }
+
+    fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        if (!_started) return
+        val displayMetrics = service.resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        val wWidth = if (view != null && view.width > 0) view.width else (config.width ?: 0)
+        val wHeight = if (view != null && view.height > 0) view.height else (config.height ?: 0)
+
+        // Constrain current positions to new screen boundaries
+        val constrainedX = Math.max(0, Math.min(layoutParams.x, screenWidth - wWidth))
+        val constrainedY = Math.max(0, Math.min(layoutParams.y, screenHeight - wHeight))
+
+        if (config.magnet != false) {
+            val targetX = if (constrainedX + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)
+            val animator = android.animation.ValueAnimator.ofInt(layoutParams.x, targetX)
+            animator.duration = (config.snapDuration ?: 250).toLong()
+            animator.interpolator = getInterpolator(config.snapCurve)
+            animator.addUpdateListener { valueAnimator ->
+                val animX = valueAnimator.animatedValue as Int
+                update(Config().apply {
+                    x = animX
+                    y = constrainedY
+                })
+            }
+            animator.start()
+        } else {
+            update(Config().apply {
+                x = constrainedX
+                y = constrainedY
+            })
+        }
+    }
 
     override fun onTouch(view: View?, event: MotionEvent?): Boolean {
         // default draggable should be false
@@ -388,7 +437,12 @@ class HQFloatingWindow(
                     y = constrainedY
                 })
 
-                emit("dragging", listOf(constrainedX, constrainedY))
+                // Throttle dragging event emission (max once every 16ms)
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastDragEmitTime >= 16) {
+                    emit("dragging", listOf(constrainedX, constrainedY))
+                    lastDragEmitTime = currentTime
+                }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 // touch end
@@ -397,8 +451,8 @@ class HQFloatingWindow(
                         // magnet effect snapping to horizontal edge
                         val targetX = if (layoutParams.x + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)
                         val animator = android.animation.ValueAnimator.ofInt(layoutParams.x, targetX)
-                        animator.duration = 250
-                        animator.interpolator = android.view.animation.DecelerateInterpolator()
+                        animator.duration = (config.snapDuration ?: 250).toLong()
+                        animator.interpolator = getInterpolator(config.snapCurve)
                         animator.addUpdateListener { valueAnimator ->
                             val animX = valueAnimator.animatedValue as Int
                             update(Config().apply { x = animX })
@@ -448,6 +502,8 @@ class HQFloatingWindow(
 
         var visible: Boolean? = null
         var magnet: Boolean? = null
+        var snapDuration: Int? = null
+        var snapCurve: String? = null
 
 
         // inline fun <reified T: Any?>to(): T {
@@ -510,6 +566,8 @@ class HQFloatingWindow(
 
             map["visible"] = visible
             map["magnet"] = magnet
+            map["snapDuration"] = snapDuration
+            map["snapCurve"] = snapCurve
 
             return map;
         }
@@ -536,6 +594,8 @@ class HQFloatingWindow(
 
             cfg.visible?.let { visible = it }
             cfg.magnet?.let { magnet = it }
+            cfg.snapDuration?.let { snapDuration = it }
+            cfg.snapCurve?.let { snapCurve = it }
 
             return this
         }
@@ -559,14 +619,14 @@ class HQFloatingWindow(
 
                 cfg.autosize = data["autosize"] as Boolean?
 
-                cfg.width = data["width"] as Int?
-                cfg.height = data["height"] as Int?
-                cfg.x = data["x"] as Int?
-                cfg.y = data["y"] as Int?
+                cfg.width = (data["width"] as? Number)?.toInt()
+                cfg.height = (data["height"] as? Number)?.toInt()
+                cfg.x = (data["x"] as? Number)?.toInt()
+                cfg.y = (data["y"] as? Number)?.toInt()
 
-                cfg.gravity = data["gravity"] as Int?
-                cfg.format = data["format"] as Int?
-                cfg.type = data["type"] as Int?
+                cfg.gravity = (data["gravity"] as? Number)?.toInt()
+                cfg.format = (data["format"] as? Number)?.toInt()
+                cfg.type = (data["type"] as? Number)?.toInt()
 
                 cfg.clickable = data["clickable"] as Boolean?
                 cfg.draggable = data["draggable"] as Boolean?
@@ -576,6 +636,8 @@ class HQFloatingWindow(
 
                 cfg.visible = data["visible"] as Boolean?
                 cfg.magnet = data["magnet"] as Boolean?
+                cfg.snapDuration = (data["snapDuration"] as? Number)?.toInt()
+                cfg.snapCurve = data["snapCurve"] as String?
 
                 return cfg
             }

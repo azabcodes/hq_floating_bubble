@@ -245,6 +245,12 @@ class HQFloatingWindowConfig {
   /// Magnet snapping horizontal edge effect
   bool? magnet;
 
+  /// Duration of magnet snap animation in milliseconds
+  int? snapDuration;
+
+  /// Interpolator curve name for magnet snap (e.g. decelerate, bounce, overshoot, accelerate, linear)
+  String? snapCurve;
+
   /// we need this for update, so must wihtout default value
   HQFloatingWindowConfig({
     this.id = "default",
@@ -265,6 +271,8 @@ class HQFloatingWindowConfig {
     this.immersion,
     this.visible,
     this.magnet = true,
+    this.snapDuration = 250,
+    this.snapCurve = "decelerate",
   }) : assert(
          callback == null ||
              PluginUtilities.getCallbackHandle(callback) != null,
@@ -303,6 +311,8 @@ class HQFloatingWindowConfig {
 
       visible: map["visible"],
       magnet: map["magnet"],
+      snapDuration: map["snapDuration"],
+      snapCurve: map["snapCurve"],
     );
   }
 
@@ -335,6 +345,8 @@ class HQFloatingWindowConfig {
 
     map["visible"] = visible;
     map["magnet"] = magnet;
+    map["snapDuration"] = snapDuration;
+    map["snapCurve"] = snapCurve;
 
     return map;
   }

@@ -4,6 +4,7 @@ import 'package:hq_floating_bubble/hq_floating_bubble.dart';
 import 'package:hq_floating_bubble_example/views/example2.dart';
 import 'package:hq_floating_bubble_example/views/example3.dart';
 import 'package:hq_floating_bubble_example/views/example1.dart';
+import 'package:hq_floating_bubble_example/views/example4.dart';
 
 void main() {
   runApp(MyApp());
@@ -54,12 +55,23 @@ class _MyAppState extends State<MyApp> {
       height: HQFloatingWindowSize.matchParent,
       clickable: false,
     ),
+    HQFloatingWindowConfig(
+      id: "showcase_bubble",
+      route: "/showcase_bubble_view",
+      width: 160,
+      height: 160,
+      draggable: true,
+      magnet: true,
+      snapDuration: 250,
+      snapCurve: "bounce",
+    ),
   ];
 
   final Map<String, WidgetBuilder> _builders = {
     "normal": (_) => NonrmalView(),
     "assitive_touch": (_) => AssistiveTouch(),
     "night": (_) => NightView(),
+    "showcase_bubble": (_) => const ShowcaseBubbleView(),
   };
 
   final Map<String, Widget Function(BuildContext)> _routes = {};
@@ -69,6 +81,7 @@ class _MyAppState extends State<MyApp> {
     super.initState();
 
     _routes["/"] = (_) => HomePage(configs: _configs);
+    _routes["/showcase"] = (_) => const CompleteShowcaseView();
 
     _configs.forEach(
       (c) => {
@@ -161,7 +174,16 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('HQFloating example app')),
+      appBar: AppBar(
+        title: const Text('HQFloating example app'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.developer_mode_rounded),
+            tooltip: "Complete Showcase",
+            onPressed: () => Navigator.of(context).pushNamed("/showcase"),
+          ),
+        ],
+      ),
       body: _ready
           ? ListView(children: _windows.map((e) => _item(e)).toList())
           : Center(

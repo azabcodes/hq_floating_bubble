@@ -26,6 +26,9 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.FlutterCallbackInformation
 import org.json.JSONObject
 import java.lang.Exception
+import androidx.core.content.ContextCompat
+import java.lang.ref.WeakReference
+import java.util.concurrent.ConcurrentHashMap
 
 class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.MessageHandler<Any?>, Service() {
 
@@ -37,16 +40,34 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
     lateinit var _channel: MethodChannel
     lateinit var _message: BasicMessageChannel<Any?>
 
-    var subscribedEvents: HashMap<String, Boolean> = HashMap()
+    var subscribedEvents: ConcurrentHashMap<String, Boolean> = ConcurrentHashMap()
 
     var pixelRadio = 2.0
     var systemConfig = emptyMap<String, Any?>()
 
     // store the window object use the id as key
-    val windows = HashMap<String, HQFloatingWindow>()
+    val windows = ConcurrentHashMap<String, HQFloatingWindow>()
+    val createdEngineKeys = java.util.Collections.synchronizedSet(HashSet<String>())
 
     override fun onCreate() {
         super.onCreate()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("hq_floating_bubble", "HQFloating Service", NotificationManager.IMPORTANCE_MIN)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
+            val imageId = resources.getIdentifier("ic_launcher", "mipmap", packageName)
+            val notification = NotificationCompat.Builder(this, "hq_floating_bubble")
+                .setContentTitle("HQFloating Service")
+                .setContentText("Service is running in background")
+                .setSmallIcon(imageId)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(1, notification)
+            }
+        }
 
         // set the instance
         instance = this
@@ -109,11 +130,24 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         super.onDestroy()
 
         // clean up: remove all views in the window manager
-        windows.forEach {
-            it.value.destroy()
+        windows.values.toList().forEach {
+            it.destroy()
             Log.d(TAG, "[service] service destroy: remove the float window ${it.key}")
         }
         setWakeLock(false)
+
+        // clean up all cached engines for overlay windows
+        createdEngineKeys.forEach { k ->
+            FlutterEngineCache.getInstance().remove(k)
+        }
+        createdEngineKeys.clear()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        windows.forEach {
+            it.value.onConfigurationChanged(newConfig)
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) = when (call.method) {
@@ -235,7 +269,11 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
 
-        startForeground(1, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(1, notification)
+        }
         return true
     }
 
@@ -260,7 +298,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
     private fun createWindow(id: String, config: HQFloatingWindow.Config, start: Boolean = false,
         p: HQFloatingWindow?): Map<String, Any?>? {
         // check if id exits
-        if (windows.contains(id)) {
+        if (windows.containsKey(id)) {
             Log.e(TAG, "[service] window with id $id exits")
             return null
         }
@@ -312,6 +350,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
 
             // store the engine to cache
             FlutterEngineCache.getInstance().put(key, eng)
+            createdEngineKeys.add(key)
 
             return Pair(eng, false)
         }
@@ -339,6 +378,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
 
         // store the engine to cache
         FlutterEngineCache.getInstance().put(key, eng)
+        createdEngineKeys.add(key)
 
         return Pair(eng, false)
     }
@@ -386,8 +426,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         private val TAG = "HQFloatingService"
 
         // TODO: improve
-        @SuppressLint("StaticFieldLeak")
-        var mActivity: Activity? = null
+        var activityRef: WeakReference<Activity>? = null
         var mActivityClass: Class<Activity>? = null
 
         @SuppressLint("StaticFieldLeak")
@@ -459,7 +498,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
 
             // start the service
             val intent = Intent(context, HQFloatingService::class.java)
-            context.startService(intent)
+            ContextCompat.startForegroundService(context, intent)
             
             // Service.onCreate() runs on main thread, so we can't block here
             // Return true optimistically - the service will be ready when needed
@@ -482,7 +521,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
             }
             
             val intent = Intent(context, HQFloatingService::class.java)
-            context.startService(intent)
+            ContextCompat.startForegroundService(context, intent)
             
             // Use Handler to check after service has chance to start
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -493,13 +532,13 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         fun onActivityAttached(activity: Activity) {
             Log.i(TAG, "[service] activity attached")
             // maybe instance is null, so set failed
-            if (mActivity != null) {
+            if (activityRef?.get() != null) {
                 Log.w(TAG, "[service] main activity already set")
                 return
             }
-            mActivity = activity
+            activityRef = WeakReference(activity)
             // store the class
-            mActivityClass = mActivity?.javaClass
+            mActivityClass = activity.javaClass as Class<Activity>
         }
 
         fun installChannel(eng: FlutterEngine): Boolean {
@@ -508,7 +547,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         }
 
         fun isRunning(context: Context): Boolean {
-            return HQFloatingUtils.getRunningService(context, HQFloatingService::class.java) != null
+            return instance != null && instance?.applicationContext != null
         }
 
         fun start(context: Context): Boolean {

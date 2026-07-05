@@ -1,3 +1,14 @@
+## 0.0.4
+
+* Implemented stability & memory management updates on the native Android (Kotlin) layer:
+  * Prevented Activity memory leaks using `WeakReference<Activity>`.
+  * Resolved overlay request race conditions in `waitPermissionResult`.
+  * Fully added Android 14+ Foreground Service support (`specialUse`) with native manifest declarations.
+  * Re-registered active activity reference during configurations/orientations rotation changes.
+  * Wrapped overlay view removal in try-catch to prevent layout detachment crashes.
+  * Added safety type conversion for all parameters sent from Dart to prevent conversion crashes.
+  * Prevented event filter bypasses and resolved concurrent modification exceptions in window lifecycle lists.
+
 ## 0.0.3
 
 * Fixed Kotlin compilation error where `JSONObject.toMap()` was unresolved by moving the extension function to the package level.
