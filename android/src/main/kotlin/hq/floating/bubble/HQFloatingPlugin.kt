@@ -33,33 +33,36 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
   private var serviceChannelInstalled = false
   private var isMain = false
 
+  private var myEngine: FlutterEngine? = null
+  private var myWindowId: String? = null
+  private var myConfig: HQFloatingWindow.Config? = null
+
   override fun onAttachedToEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
     mContext = binding.applicationContext
+    myEngine = binding.flutterEngine
 
-    // should window's engine install method channel?
+    // Register method channel
     channel = MethodChannel(binding.binaryMessenger, CHANNEL_NAME)
     channel.setMethodCallHandler(this)
 
-    // how to known i'm a window engine not the main one?
-    // if contains engine already, means we are coming from window
-    // TODO: take first engine as main, but if service auto start the window
-    // this will cause error
+    // Register the window channel on this engine
+    MethodChannel(binding.binaryMessenger, "${HQFloatingService.METHOD_CHANNEL}/window")
+      .setMethodCallHandler(this)
+
+    val startingId = HQFloatingService.startingWindowId
+    val startingConfig = HQFloatingService.startingWindowConfig
+    if (startingId != null) {
+      myWindowId = startingId
+      myConfig = startingConfig
+    }
+
     if (FlutterEngineCache.getInstance().contains(FLUTTER_ENGINE_CACHE_KEY)) {
-      Log.d(TAG, "[plugin] on attached to window engine")
+      Log.d(TAG, "[plugin] on attached to window engine: $myWindowId")
     } else {
-      // update the main flag
       isMain = true
-      // store the flutter engine @only main
       engine = binding.flutterEngine
       FlutterEngineCache.getInstance().put(FLUTTER_ENGINE_CACHE_KEY, engine)
-      // should install service handler for every engine? @only main
-      // window has already set in this own logic
       serviceChannelInstalled = HQFloatingService.installChannel(engine)
-        .also { r -> if (!r) {
-          MethodChannel(engine.dartExecutor.binaryMessenger,
-            "${HQFloatingService.METHOD_CHANNEL}/window").also { it.setMethodCallHandler(this) }
-        } }
-
       Log.d(TAG, "[plugin] on attached to main engine")
     }
   }
@@ -143,8 +146,41 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
   }
 
   override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
+    if (call.method == "window.sync") {
+      val currentWindow = HQFloatingService.instance?.windows?.values?.find { it.engine == myEngine }
+      if (currentWindow != null) {
+        result.success(currentWindow.toMap())
+      } else if (myWindowId != null && myConfig != null) {
+        val map = HashMap<String, Any?>()
+        map["id"] = myWindowId
+        val shared = mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE)
+        map["pixelRadio"] = shared.getFloat(PIXEL_RADIO_KEY, 0F).toDouble()
+        try {
+          val sysConfigStr = shared.getString(SYSTEM_CONFIG_KEY, null)
+          if (sysConfigStr != null) {
+            val sysJson = JSONObject(sysConfigStr)
+            val sysMap = HashMap<String, Any?>()
+            val keys = sysJson.keys()
+            while (keys.hasNext()) {
+              val key = keys.next()
+              sysMap[key] = sysJson.get(key)
+            }
+            map["system"] = sysMap
+          }
+        } catch (_: Exception) {}
+        map["config"] = myConfig?.toMap()?.filter { it.value != null }
+        result.success(map)
+      } else {
+        result.success(null)
+      }
+      return
+    }
+
     if (call.method.startsWith("window.") || call.method.startsWith("service.") || call.method == "data.share") {
-      if (HQFloatingService.instance != null) {
+      val currentWindow = HQFloatingService.instance?.windows?.values?.find { it.engine == myEngine }
+      if (currentWindow != null) {
+        currentWindow.onMethodCall(call, result)
+      } else if (HQFloatingService.instance != null) {
         HQFloatingService.instance!!.onMethodCall(call, result)
       } else {
         result.error("SERVICE_NOT_RUNNING", "Floating service is not running", null)
@@ -213,6 +249,12 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
 
   override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
     channel.setMethodCallHandler(null)
+    try {
+      MethodChannel(binding.binaryMessenger, "${HQFloatingService.METHOD_CHANNEL}/window")
+        .setMethodCallHandler(null)
+    } catch (_: Exception) {}
+    myEngine = null
+    myConfig = null
   }
 
   override fun onAttachedToActivity(binding: ActivityPluginBinding) {

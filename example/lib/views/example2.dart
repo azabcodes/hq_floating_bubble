@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'dart:async';
 import 'dart:math';
 
@@ -6,13 +8,13 @@ import 'package:flutter/scheduler.dart';
 import 'package:hq_floating_bubble/hq_floating_bubble.dart';
 
 class AssistiveTouch extends StatefulWidget {
-  const AssistiveTouch({Key? key}) : super(key: key);
+  const AssistiveTouch({super.key});
 
   @override
   State<AssistiveTouch> createState() => _AssistiveTouchState();
 }
 
-@pragma("vm:entry-point")
+@pragma('vm:entry-point')
 void _pannelMain() {
   runApp(((_) => AssistivePannel()).floating(app: true).make());
 }
@@ -30,10 +32,10 @@ class _AssistiveTouchState extends State<AssistiveTouch> {
 
     initAsyncState();
 
-    SchedulerBinding.instance?.addPostFrameCallback((_) {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       touchWindow = HQFloatingWindow.of(context);
       touchWindow?.on(HQFloatingEventType.WindowStarted, (window, data) {
-        print("touch window start ...");
+        print('touch window start ...');
         expend = false;
         setState(() {});
       });
@@ -43,7 +45,7 @@ class _AssistiveTouchState extends State<AssistiveTouch> {
   void initAsyncState() async {
     // create the pannel window
     pannelWindow = HQFloatingWindowConfig(
-      id: "assistive_pannel",
+      id: 'assistive_pannel',
       callback: _pannelMain,
       width: HQFloatingWindowSize.matchParent,
       height: HQFloatingWindowSize.matchParent,
@@ -88,7 +90,7 @@ class _AssistiveTouchState extends State<AssistiveTouch> {
 @immutable
 class AssistiveButton extends StatefulWidget {
   const AssistiveButton({
-    Key? key,
+    super.key,
     this.child = const _DefaultChild(),
     this.visible = true,
     this.shouldStickToSide = true,
@@ -96,7 +98,7 @@ class AssistiveButton extends StatefulWidget {
     this.initialOffset = Offset.infinite,
     this.onTap,
     this.animatedBuilder,
-  }) : super(key: key);
+  });
 
   /// The widget below this widget in the tree.
   final Widget child;
@@ -116,15 +118,13 @@ class AssistiveButton extends StatefulWidget {
   final VoidCallback? onTap;
 
   /// Custom animated builder.
-  final Widget Function(BuildContext context, Widget child, bool visible)?
-  animatedBuilder;
+  final Widget Function(BuildContext context, Widget child, bool visible)? animatedBuilder;
 
   @override
   _AssistiveButtonState createState() => _AssistiveButtonState();
 }
 
-class _AssistiveButtonState extends State<AssistiveButton>
-    with TickerProviderStateMixin {
+class _AssistiveButtonState extends State<AssistiveButton> with TickerProviderStateMixin {
   bool isInitialized = false;
   late Offset offset = widget.initialOffset;
   late Offset largerOffset = offset;
@@ -283,8 +283,7 @@ class _AssistiveButtonState extends State<AssistiveButton>
       return;
     }
 
-    final screenSize =
-        window?.system?.screenSize ?? MediaQuery.of(context).size;
+    final screenSize = window?.system?.screenSize ?? MediaQuery.of(context).size;
     final screenPadding = MediaQuery.of(context).padding;
     final viewInsets = MediaQuery.of(context).viewInsets;
     final left = screenPadding.left + viewInsets.left + widget.margin.left;
@@ -328,20 +327,19 @@ class _AssistiveButtonState extends State<AssistiveButton>
 }
 
 class AssistivePannel extends StatefulWidget {
-  const AssistivePannel({Key? key}) : super(key: key);
+  const AssistivePannel({super.key});
 
   @override
   State<AssistivePannel> createState() => _AssistivePannelState();
 }
 
-class _AssistivePannelState extends State<AssistivePannel>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _animationController = AnimationController(
+class _AssistivePannelState extends State<AssistivePannel> with SingleTickerProviderStateMixin {
+  late final AnimationController _animationController = AnimationController(
     duration: _duration,
     vsync: this,
   );
 
-  Duration _duration = Duration(milliseconds: 250);
+  final Duration _duration = Duration(milliseconds: 250);
 
   HQFloatingWindow? window;
 
@@ -355,11 +353,11 @@ class _AssistivePannelState extends State<AssistivePannel>
   void initState() {
     super.initState();
 
-    SchedulerBinding.instance?.addPostFrameCallback((_) {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       window = HQFloatingWindow.of(context);
       window
           ?.on(HQFloatingEventType.WindowStarted, (window, data) {
-            print("pannel just start ...");
+            print('pannel just start ...');
             setState(() {
               _show = true;
             });
@@ -375,9 +373,9 @@ class _AssistivePannelState extends State<AssistivePannel>
 
   double _touchX = 0.0;
   double _touchY = 0.0;
-  double _touchSize = 56.0;
+  final double _touchSize = 56.0;
 
-  _updatePostion(double x, double y) {
+  void _updatePostion(double x, double y) {
     setState(() {
       _touchX = x;
       _touchY = y;
@@ -423,7 +421,7 @@ class _AssistivePannelState extends State<AssistivePannel>
               width: size,
               height: size,
               child: GestureDetector(
-                onTap: () => null,
+                onTap: () {},
                 child: AnimatedScale(
                   scale: _show ? 1.0 : 0.0,
                   alignment: Alignment(
@@ -450,7 +448,7 @@ class _AssistivePannelState extends State<AssistivePannel>
 
   bool _show = false;
 
-  _onTap() {
+  void _onTap() {
     setState(() {
       _show = false;
     });
@@ -459,7 +457,7 @@ class _AssistivePannelState extends State<AssistivePannel>
 }
 
 class _DefaultChild extends StatelessWidget {
-  const _DefaultChild({Key? key}) : super(key: key);
+  const _DefaultChild({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -476,7 +474,7 @@ class _DefaultChild extends StatelessWidget {
         width: 40,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: Colors.grey[400]!.withOpacity(.6),
+          color: Colors.grey[400]!.withValues(alpha: .6),
           borderRadius: const BorderRadius.all(Radius.circular(28)),
         ),
         child: Container(
@@ -484,7 +482,7 @@ class _DefaultChild extends StatelessWidget {
           width: 32,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: Colors.grey[300]!.withOpacity(.6),
+            color: Colors.grey[300]!.withValues(alpha: .6),
             borderRadius: const BorderRadius.all(Radius.circular(28)),
           ),
           child: Container(

@@ -297,28 +297,35 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
 
     private fun createWindow(id: String, config: HQFloatingWindow.Config, start: Boolean = false,
         p: HQFloatingWindow?): Map<String, Any?>? {
-        // check if id exits
-        if (windows.containsKey(id)) {
-            Log.e(TAG, "[service] window with id $id exits")
-            return null
+        startingWindowId = id
+        startingWindowConfig = config
+        try {
+            // check if id exits
+            if (windows.containsKey(id)) {
+                Log.e(TAG, "[service] window with id $id exits")
+                return null
+            }
+
+            // get flutter engine
+            val fKey = id.flutterKey()
+            val (eng, fromCache) = getFlutterEngine(fKey, config.entry, config.route, config.callback)
+
+            val svc = this
+            return HQFloatingWindow(mContext, windowManager, fKey, eng, config).apply {
+                key = id
+                service = svc
+                parent = p
+                Log.d(TAG, "[service] set window as handler $METHOD_CHANNEL/window for $eng")
+            }.init().also {
+                Log.d(TAG, "[service] created window: $id $config")
+                it.emit("created", !fromCache)
+                windows[it.key] = it
+                if (start) it.start()
+            }.toMap()
+        } finally {
+            startingWindowId = null
+            startingWindowConfig = null
         }
-
-        // get flutter engine
-        val fKey = id.flutterKey()
-        val (eng, fromCache) = getFlutterEngine(fKey, config.entry, config.route, config.callback)
-
-        val svc = this
-        return HQFloatingWindow(mContext, windowManager, fKey, eng, config).apply {
-            key = id
-            service = svc
-            parent = p
-            Log.d(TAG, "[service] set window as handler $METHOD_CHANNEL/window for $eng")
-        }.init().also {
-            Log.d(TAG, "[service] created window: $id $config")
-            it.emit("created", !fromCache)
-            windows[it.key] = it
-            if (start) it.start()
-        }.toMap()
     }
 
     // this function is useful when we want to start service automatically
@@ -529,15 +536,18 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
             }, 100)
         }
 
+        @JvmStatic
+        var startingWindowId: String? = null
+        @JvmStatic
+        var startingWindowConfig: HQFloatingWindow.Config? = null
+
         fun onActivityAttached(activity: Activity) {
             Log.i(TAG, "[service] activity attached")
-            // maybe instance is null, so set failed
             if (activityRef?.get() != null) {
                 Log.w(TAG, "[service] main activity already set")
                 return
             }
             activityRef = WeakReference(activity)
-            // store the class
             mActivityClass = activity.javaClass as Class<Activity>
         }
 

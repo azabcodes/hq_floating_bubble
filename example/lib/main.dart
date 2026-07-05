@@ -96,6 +96,7 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      scrollBehavior: const ScrollBehavior().copyWith(overscroll: false),
       initialRoute: "/",
       routes: _routes,
     );

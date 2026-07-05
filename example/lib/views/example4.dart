@@ -1,9 +1,10 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hq_floating_bubble/hq_floating_bubble.dart';
 
 class CompleteShowcaseView extends StatefulWidget {
-  const CompleteShowcaseView({Key? key}) : super(key: key);
+  const CompleteShowcaseView({super.key});
 
   @override
   State<CompleteShowcaseView> createState() => _CompleteShowcaseViewState();
@@ -13,18 +14,17 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
   // Config state
   bool _magnet = true;
   int _snapDuration = 250;
-  String _snapCurve =
-      "bounce"; // Default to bounce to showcase the effect clearly
+  String _snapCurve = 'bounce'; // Default to bounce to showcase the effect clearly
 
   // WakeLock state
   bool _wakeLockEnabled = false;
 
   // Foreground Service states
-  final _titleController = TextEditingController(text: "HQ Showcase Service");
+  final _titleController = TextEditingController(text: 'HQ Showcase Service');
   final _descController = TextEditingController(
-    text: "Complete features test is active",
+    text: 'Complete features test is active',
   );
-  final _iconController = TextEditingController(text: "ic_launcher");
+  final _iconController = TextEditingController(text: 'ic_launcher');
 
   // Event stream subscription and logs
   StreamSubscription? _eventSubscription;
@@ -69,9 +69,9 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
     }
 
     final config = HQFloatingWindowConfig(
-      id: "showcase_bubble",
-      entry: "main",
-      route: "/showcase_bubble_view",
+      id: 'showcase_bubble',
+      entry: 'main',
+      route: '/showcase_bubble_view',
       width: 160,
       height: 160,
       draggable: true,
@@ -81,7 +81,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
       clickable: true,
     );
 
-    final win = await config.create(id: "showcase_bubble");
+    final win = await config.create(id: 'showcase_bubble');
     if (win != null) {
       setState(() {
         _showcaseWindow = win;
@@ -140,7 +140,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
       description: _descController.text,
       icon: _iconController.text,
       showWhen: true,
-      subText: "Showcase Mode",
+      subText: 'Showcase Mode',
     );
   }
 
@@ -161,7 +161,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Full Features Showcase"),
+        title: const Text('Full Features Showcase'),
         backgroundColor: Colors.indigo,
       ),
       body: SingleChildScrollView(
@@ -178,7 +178,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "1. Window Control Dashboard",
+                      '1. Window Control Dashboard',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -191,13 +191,11 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                       children: [
                         ElevatedButton(
                           onPressed: _isWindowCreated ? null : _createWindow,
-                          child: const Text("Create"),
+                          child: const Text('Create'),
                         ),
                         ElevatedButton(
-                          onPressed: (_isWindowCreated && !_isWindowStarted)
-                              ? _startWindow
-                              : null,
-                          child: const Text("Start"),
+                          onPressed: (_isWindowCreated && !_isWindowStarted) ? _startWindow : null,
+                          child: const Text('Start'),
                         ),
                         ElevatedButton(
                           onPressed: _isWindowStarted ? _closeWindow : null,
@@ -205,7 +203,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                             backgroundColor: Colors.red[100],
                             foregroundColor: Colors.red,
                           ),
-                          child: const Text("Close"),
+                          child: const Text('Close'),
                         ),
                       ],
                     ),
@@ -216,12 +214,12 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                         ElevatedButton.icon(
                           onPressed: _isWindowStarted ? _showWindow : null,
                           icon: const Icon(Icons.visibility),
-                          label: const Text("Show (Scale & Fade)"),
+                          label: const Text('Show (Scale & Fade)'),
                         ),
                         ElevatedButton.icon(
                           onPressed: _isWindowStarted ? _hideWindow : null,
                           icon: const Icon(Icons.visibility_off),
-                          label: const Text("Hide"),
+                          label: const Text('Hide'),
                         ),
                       ],
                     ),
@@ -240,7 +238,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "2. Magnet Snap Customization",
+                      '2. Magnet Snap Customization',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -249,7 +247,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                     ),
                     const SizedBox(height: 10),
                     SwitchListTile(
-                      title: const Text("Enable Magnet Snapping"),
+                      title: const Text('Enable Magnet Snapping'),
                       value: _magnet,
                       onChanged: (val) {
                         setState(() => _magnet = val);
@@ -257,16 +255,16 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                       },
                     ),
                     ListTile(
-                      title: const Text("Snap Curve/Interpolator"),
+                      title: const Text('Snap Curve/Interpolator'),
                       trailing: DropdownButton<String>(
                         value: _snapCurve,
                         items:
                             [
-                              "decelerate",
-                              "bounce",
-                              "overshoot",
-                              "accelerate",
-                              "linear",
+                              'decelerate',
+                              'bounce',
+                              'overshoot',
+                              'accelerate',
+                              'linear',
                             ].map((String value) {
                               return DropdownMenuItem<String>(
                                 value: value,
@@ -281,13 +279,13 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                         },
                       ),
                     ),
-                    Text("Snap Duration: $_snapDuration ms"),
+                    Text('Snap Duration: $_snapDuration ms'),
                     Slider(
                       value: _snapDuration.toDouble(),
                       min: 100,
                       max: 2000,
                       divisions: 19,
-                      label: "$_snapDuration ms",
+                      label: '$_snapDuration ms',
                       onChanged: (val) {
                         setState(() => _snapDuration = val.toInt());
                         _updateConfig();
@@ -308,7 +306,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "3. Foreground & Wakelock Control",
+                      '3. Foreground & Wakelock Control',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -319,19 +317,19 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                     TextField(
                       controller: _titleController,
                       decoration: const InputDecoration(
-                        labelText: "Notification Title",
+                        labelText: 'Notification Title',
                       ),
                     ),
                     TextField(
                       controller: _descController,
                       decoration: const InputDecoration(
-                        labelText: "Notification Description",
+                        labelText: 'Notification Description',
                       ),
                     ),
                     TextField(
                       controller: _iconController,
                       decoration: const InputDecoration(
-                        labelText: "Drawable Icon Name",
+                        labelText: 'Drawable Icon Name',
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -340,7 +338,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                       children: [
                         ElevatedButton(
                           onPressed: _promote,
-                          child: const Text("Promote Service"),
+                          child: const Text('Promote Service'),
                         ),
                         ElevatedButton(
                           onPressed: _demote,
@@ -348,15 +346,15 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                             backgroundColor: Colors.grey[200],
                             foregroundColor: Colors.black,
                           ),
-                          child: const Text("Demote"),
+                          child: const Text('Demote'),
                         ),
                       ],
                     ),
                     const SizedBox(height: 10),
                     SwitchListTile(
-                      title: const Text("CPU WakeLock"),
+                      title: const Text('CPU WakeLock'),
                       subtitle: const Text(
-                        "Keep CPU running when screen is off",
+                        'Keep CPU running when screen is off',
                       ),
                       value: _wakeLockEnabled,
                       onChanged: _toggleWakeLock,
@@ -379,7 +377,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          "4. Real-time Event Log",
+                          '4. Real-time Event Log',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -402,7 +400,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
                       child: _eventLogs.isEmpty
                           ? const Center(
                               child: Text(
-                                "No events recorded yet.\nTry dragging, showing, or hiding the bubble.",
+                                'No events recorded yet.\nTry dragging, showing, or hiding the bubble.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(color: Colors.grey),
                               ),
@@ -440,7 +438,7 @@ class _CompleteShowcaseViewState extends State<CompleteShowcaseView> {
 
 // Simple floating bubble overlay view widget
 class ShowcaseBubbleView extends StatelessWidget {
-  const ShowcaseBubbleView({Key? key}) : super(key: key);
+  const ShowcaseBubbleView({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -449,7 +447,7 @@ class ShowcaseBubbleView extends StatelessWidget {
         width: 100,
         height: 100,
         decoration: BoxDecoration(
-          color: Colors.indigo.withOpacity(0.9),
+          color: Colors.indigo.withValues(alpha: 0.9),
           shape: BoxShape.circle,
           boxShadow: const [
             BoxShadow(

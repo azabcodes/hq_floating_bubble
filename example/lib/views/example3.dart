@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:hq_floating_bubble/hq_floating_bubble.dart';
 
 class NightView extends StatefulWidget {
-  const NightView({Key? key}) : super(key: key);
+  const NightView({super.key});
 
   @override
   State<NightView> createState() => _NightViewState();
 }
 
 class _NightViewState extends State<NightView> {
-  Color color = Color.fromARGB(255, 192, 200, 41).withOpacity(0.20);
+  Color color = Color.fromARGB(255, 192, 200, 41).withValues(alpha: 0.20);
 
   @override
   void initState() {
@@ -18,7 +18,7 @@ class _NightViewState extends State<NightView> {
 
   HQFloatingWindow? w;
 
-  var _show = true;
+  final _show = true;
 
   @override
   Widget build(BuildContext context) {
