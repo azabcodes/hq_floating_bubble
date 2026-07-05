@@ -136,7 +136,11 @@ class _MeasuredSizedState extends State<_MeasuredSized> {
   Widget build(BuildContext context) {
     if (widget.onChange == null) return widget.child;
     SchedulerBinding.instance.addPostFrameCallback(postFrameCallback);
-    return UnconstrainedBox(
+    return OverflowBox(
+      minWidth: 0.0,
+      minHeight: 0.0,
+      maxWidth: double.infinity,
+      maxHeight: double.infinity,
       child: Container(
         key: widgetKey,
         child: NotificationListener<SizeChangedLayoutNotification>(
@@ -314,7 +318,11 @@ extension WidgetProviderExtension on Widget {
   Widget _app({bool enabled = false, bool debug = false}) {
     return !enabled
         ? this
-        : MaterialApp(debugShowCheckedModeBanner: debug, home: this);
+        : MaterialApp(
+            debugShowCheckedModeBanner: debug,
+            scrollBehavior: const ScrollBehavior().copyWith(overscroll: false),
+            home: this,
+          );
   }
 }
 

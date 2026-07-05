@@ -199,6 +199,14 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
         Log.d(TAG, "[plugin] fake window.sync")
         return result.success(null)
       }
+      "service.promote", "service.demote", "service.set_wakelock", "service.stop_service" -> {
+        if (HQFloatingService.instance != null) {
+          HQFloatingService.instance!!.onMethodCall(call, result)
+        } else {
+          result.error("SERVICE_NOT_RUNNING", "Floating service is not running", null)
+        }
+        return
+      }
       else -> {
         Log.d(TAG, "[plugin] method ${call.method} not implement")
         result.notImplemented()
