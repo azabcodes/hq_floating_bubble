@@ -72,6 +72,17 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         // set the instance
         instance = this
 
+        // Trigger all pending callbacks
+        synchronized(pendingServiceCallbacks) {
+            val callbacks = ArrayList(pendingServiceCallbacks)
+            pendingServiceCallbacks.clear()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                for (cb in callbacks) {
+                    cb(true)
+                }
+            }
+        }
+
         mContext = applicationContext
 
         engGroup = FlutterEngineGroup(mContext)
@@ -515,6 +526,8 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         }
         
         // Async version for callbacks
+        val pendingServiceCallbacks = java.util.Collections.synchronizedList(ArrayList<(Boolean) -> Unit>())
+
         fun ensureServiceAsync(context: Context, callback: (Boolean) -> Unit) {
             if (instance != null) {
                 callback(true)
@@ -527,13 +540,25 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
                 return
             }
             
+            pendingServiceCallbacks.add(callback)
+            
             val intent = Intent(context, HQFloatingService::class.java)
             ContextCompat.startForegroundService(context, intent)
             
-            // Use Handler to check after service has chance to start
+            // Timeout after 4 seconds as a fallback check
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                callback(instance != null)
-            }, 100)
+                val fired = synchronized(pendingServiceCallbacks) {
+                    if (pendingServiceCallbacks.contains(callback)) {
+                        pendingServiceCallbacks.remove(callback)
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (fired) {
+                    callback(instance != null)
+                }
+            }, 4000)
         }
 
         @JvmStatic
