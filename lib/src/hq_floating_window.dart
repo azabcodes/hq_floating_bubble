@@ -1,9 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:convert';
 import 'package:hq_floating_bubble/hq_floating_bubble.dart';
 
 class HQFloatingWindow {
@@ -14,7 +14,7 @@ class HQFloatingWindow {
   /// Stream of events emitted by this specific window.
   Stream<HQFloatingEvent> get onEvent => eventController.stream;
 
-  String id = "default";
+  String id = 'default';
   HQFloatingWindowConfig? config;
 
   double? pixelRadio;
@@ -23,27 +23,44 @@ class HQFloatingWindow {
 
   late EventManager _eventManager;
 
-  HQFloatingWindow({this.id = "default", this.config}) {
-    _eventManager = EventManager(_message, window: this);
+  static bool _handlerInitialized = false;
 
-    // share data use the call
+  static void _initMethodCallHandler() {
+    if (_handlerInitialized) return;
+    _handlerInitialized = true;
+
     _channel.setMethodCallHandler((call) {
       switch (call.method) {
-        case "data.share":
+        case 'data.share':
           {
-            var map = call.arguments as Map<dynamic, dynamic>;
-            // source, name, data
-            // if not provided, should not call this
-            return _onDataHandler?.call(
-                  map["source"],
-                  map["name"],
-                  map["data"],
-                ) ??
-                Future.value(null);
+            final argsRaw = call.arguments;
+            if (argsRaw is! Map) {
+              // Guard against a malformed/null payload from the native
+              // side instead of letting an unchecked cast throw here.
+              return Future.value(null);
+            }
+            var map = argsRaw;
+            var targetId = map['target'];
+            var targetWindow =
+                HQFloatingService().windows[targetId] ?? HQFloatingService().currentWindow;
+
+            if (targetWindow != null) {
+              return targetWindow._onDataHandler?.call(
+                    map['source'],
+                    map['name'],
+                    map['data'],
+                  ) ??
+                  Future.value(null);
+            }
           }
       }
       return Future.value(null);
     });
+  }
+
+  HQFloatingWindow({this.id = 'default', this.config}) {
+    _eventManager = EventManager(_message, window: this);
+    _initMethodCallHandler();
   }
 
   static final MethodChannel _channel = MethodChannel(
@@ -51,25 +68,28 @@ class HQFloatingWindow {
   );
   static final BasicMessageChannel _message = BasicMessageChannel(
     '${HQFloatingService.channelID}/window_msg',
-    JSONMessageCodec(),
+    const JSONMessageCodec(),
   );
 
   factory HQFloatingWindow.fromMap(Map<dynamic, dynamic>? map) {
-    return HQFloatingWindow().applyMap(map);
+    final resolvedId = (map != null && map['id'] != null) ? map['id'] as String : 'default';
+    return HQFloatingWindow(id: resolvedId).applyMap(map);
   }
 
   @override
   String toString() {
-    return "HQFloatingWindow[$id]@${super.hashCode}, ${_eventManager.toString()}, config: $config";
+    return 'HQFloatingWindow[$id]@${super.hashCode}, ${_eventManager.toString()}, config: $config';
   }
 
   HQFloatingWindow applyMap(Map<dynamic, dynamic>? map) {
     // apply the map to config and object
     if (map == null) return this;
-    id = map["id"];
-    pixelRadio = map["pixelRadio"] ?? 1.0;
-    system = HQFloatingSystemConfig.fromMap(map["system"] ?? {});
-    config = HQFloatingWindowConfig.fromMap(map["config"]);
+    // Keep the existing id if the incoming map doesn't provide one, rather
+    // than assigning null into a non-nullable String field.
+    id = map['id'] ?? id;
+    pixelRadio = map['pixelRadio'] ?? 1.0;
+    system = HQFloatingSystemConfig.fromMap(map['system'] ?? {});
+    config = HQFloatingWindowConfig.fromMap(map['config']);
     return this;
   }
 
@@ -77,9 +97,7 @@ class HQFloatingWindow {
   /// The data from the closest instance of this class that encloses the given
   /// context.
   static HQFloatingWindow? of(BuildContext context) {
-    return context
-        .dependOnInheritedWidgetOfExactType<HQFloatingProvider>()
-        ?.window;
+    return context.dependOnInheritedWidgetOfExactType<HQFloatingProvider>()?.window;
   }
 
   Future<bool?> hide() {
@@ -89,13 +107,15 @@ class HQFloatingWindow {
 
   Future<bool?> close({bool force = false}) async {
     // return await HQFloatingService().closeWindow(id, force: force);
-    return await _channel
-        .invokeMethod("window.close", {"id": id, "force": force})
-        .then((v) {
-          // remove the window from plugin
-          HQFloatingService().windows.remove(id);
-          return v;
-        });
+    final v = await _channel.invokeMethod('window.close', {'id': id, 'force': force});
+    _eventManager.clear(this);
+    _onDataHandler = null;
+    // remove the window from plugin
+    HQFloatingService().windows.remove(id);
+    // release listeners/subscribers tied to this window's event stream so
+    // it doesn't linger in memory after the window is gone.
+    await eventController.close();
+    return v;
   }
 
   Future<HQFloatingWindow?> create({bool start = false}) async {
@@ -122,13 +142,13 @@ class HQFloatingWindow {
       start: start,
       window: window,
       channel: _channel,
-      name: "window.create_child",
+      name: 'window.create_child',
     );
   }
 
   Future<bool?> start() async {
     assert(config != null, "config can't be null");
-    return await _channel.invokeMethod("window.start", {"id": id});
+    return await _channel.invokeMethod('window.start', {'id': id});
     // return await HQFloatingService().startWindow(id);
   }
 
@@ -140,12 +160,15 @@ class HQFloatingWindow {
       cfg.width = null;
       cfg.height = null;
     }
-    var updates = await _channel.invokeMapMethod("window.update", {
-      "id": id,
+    var updates = await _channel.invokeMapMethod('window.update', {
+      'id': id,
       // don't set pixelRadio
-      "config": cfg.toMap(),
+      'config': cfg.toMap(),
     });
     // var updates = await HQFloatingService().updateWindow(id, cfg);
+    // If the native side didn't return an updated config, the call didn't
+    // actually succeed - report that instead of always claiming success.
+    if (updates == null) return false;
     // update the plugin store
     applyMap(updates);
     return true;
@@ -153,30 +176,29 @@ class HQFloatingWindow {
 
   Future<bool?> show({bool visible = true}) async {
     config?.visible = visible;
-    return await _channel
-        .invokeMethod("window.show", {"id": id, "visible": visible})
-        .then((v) {
-          // update the plugin store
-          if (v) HQFloatingService().windows[id]?.config?.visible = visible;
-          return v;
-        });
+    return await _channel.invokeMethod('window.show', {'id': id, 'visible': visible}).then((v) {
+      // update the plugin store. Compare explicitly against true since `v`
+      // is dynamic and could come back null instead of a bool.
+      if (v == true) HQFloatingService().windows[id]?.config?.visible = visible;
+      return v;
+    });
   }
 
   /// share data with current window
   /// send data use current window id as target id
   /// and get value return
-  Future<dynamic> share(dynamic data, {String name = "default"}) async {
+  Future<dynamic> share(dynamic data, {String name = 'default'}) async {
     var map = {};
-    map["target"] = id;
-    map["data"] = data;
-    map["name"] = name;
+    map['target'] = id;
+    map['data'] = data;
+    map['name'] = name;
     // make sure data is serialized
-    return await _channel.invokeMethod("data.share", map);
+    return await _channel.invokeMethod('data.share', map);
   }
 
   /// launch main activity
   Future<bool> launchMainActivity() async {
-    return await _channel.invokeMethod("window.launch_main");
+    return await _channel.invokeMethod('window.launch_main');
   }
 
   /// on data to receive data from other shared
@@ -184,7 +206,7 @@ class HQFloatingWindow {
   /// but one window in engine can only have one data handler
   /// to make sure data not be comsumed multiple times.
   HQFloatingWindow onData(HQFloatingOnDataHandler handler) {
-    assert(_onDataHandler == null, "onData can only called once");
+    assert(_onDataHandler == null, 'onData can only called once');
     _onDataHandler = handler;
     return this;
   }
@@ -194,7 +216,7 @@ class HQFloatingWindow {
   // if we manage other windows in some window engine
   // this will not works, we must improve it
   static Future<Map<dynamic, dynamic>?> sync() async {
-    return await _channel.invokeMapMethod("window.sync");
+    return await _channel.invokeMapMethod('window.sync');
   }
 
   /// on register callback to listener
@@ -206,11 +228,20 @@ class HQFloatingWindow {
     return this;
   }
 
+  /// off unregister callback from listener
+  HQFloatingWindow off(
+    HQFloatingEventType type,
+    HQFloatingWindowListener callback,
+  ) {
+    _eventManager.off(this, type, callback);
+    return this;
+  }
+
   Map<String, dynamic> toMap() {
     var map = <String, dynamic>{};
-    map["id"] = id;
-    map["pixelRadio"] = pixelRadio;
-    map["config"] = config?.toMap();
+    map['id'] = id;
+    map['pixelRadio'] = pixelRadio;
+    map['config'] = config?.toMap();
     return map;
   }
 }
@@ -253,8 +284,8 @@ class HQFloatingWindowConfig {
 
   /// we need this for update, so must wihtout default value
   HQFloatingWindowConfig({
-    this.id = "default",
-    this.entry = "main",
+    this.id = 'default',
+    this.entry = 'main',
     this.route,
     this.callback,
     this.autosize,
@@ -272,81 +303,80 @@ class HQFloatingWindowConfig {
     this.visible,
     this.magnet = true,
     this.snapDuration = 250,
-    this.snapCurve = "decelerate",
+    this.snapCurve = 'decelerate',
   }) : assert(
-         callback == null ||
-             PluginUtilities.getCallbackHandle(callback) != null,
-         "callback is not a static function",
+         callback == null || PluginUtilities.getCallbackHandle(callback) != null,
+         'callback is not a static function',
        );
 
   factory HQFloatingWindowConfig.fromMap(Map<dynamic, dynamic> map) {
-    var cb;
-    if (map["callback"] != null) {
+    Function? cb;
+    if (map['callback'] != null) {
       cb = PluginUtilities.getCallbackFromHandle(
-        CallbackHandle.fromRawHandle(map["callback"]),
+        CallbackHandle.fromRawHandle(map['callback']),
       );
     }
     return HQFloatingWindowConfig(
       // id: map["id"],
-      entry: map["entry"],
-      route: map["route"],
+      entry: map['entry'],
+      route: map['route'],
       callback: cb, // get the callback from id
 
-      autosize: map["autosize"],
+      autosize: map['autosize'],
 
-      width: map["width"],
-      height: map["height"],
-      x: map["x"],
-      y: map["y"],
+      width: map['width'],
+      height: map['height'],
+      x: map['x'],
+      y: map['y'],
 
-      format: map["format"],
-      gravity: HQFloatingGravityType.unknown.fromInt(map["gravity"]),
-      type: map["type"],
+      format: map['format'],
+      gravity: HQFloatingGravityType.unknown.fromInt(map['gravity']),
+      type: map['type'],
 
-      clickable: map["clickable"],
-      draggable: map["draggable"],
-      focusable: map["focusable"],
+      clickable: map['clickable'],
+      draggable: map['draggable'],
+      focusable: map['focusable'],
 
-      immersion: map["immersion"],
+      immersion: map['immersion'],
 
-      visible: map["visible"],
-      magnet: map["magnet"],
-      snapDuration: map["snapDuration"],
-      snapCurve: map["snapCurve"],
+      visible: map['visible'],
+      magnet: map['magnet'],
+      snapDuration: map['snapDuration'],
+      snapCurve: map['snapCurve'],
     );
   }
 
   Map<String, dynamic> toMap() {
     var map = <String, dynamic>{};
     // map["id"] = id;
-    map["entry"] = entry;
-    map["route"] = route;
+    map['entry'] = entry;
+    map['route'] = route;
     // find the callback id from callback function
-    map["callback"] = callback != null
+    map['callback'] = callback != null
         ? PluginUtilities.getCallbackHandle(callback!)?.toRawHandle()
         : null;
 
-    map["autosize"] = autosize;
+    map['autosize'] = autosize;
 
-    map["width"] = width;
-    map["height"] = height;
-    map["x"] = x;
-    map["y"] = y;
+    map['width'] = width;
+    map['height'] = height;
+    map['x'] = x;
+    map['y'] = y;
 
-    map["format"] = format;
-    map["gravity"] = gravity?.toInt();
-    map["type"] = type;
+    map['format'] = format;
+    map['gravity'] = gravity?.toInt();
+    map['type'] = type;
 
-    map["clickable"] = clickable;
-    map["draggable"] = draggable;
-    map["focusable"] = focusable;
+    map['clickable'] = clickable;
+    map['draggable'] = draggable;
+    map['focusable'] = focusable;
 
-    map["immersion"] = immersion;
+    map['immersion'] = immersion;
 
-    map["visible"] = visible;
-    map["magnet"] = magnet;
-    map["snapDuration"] = snapDuration;
-    map["snapCurve"] = snapCurve;
+    map['visible'] = visible;
+    map['magnet'] = magnet;
+    map['snapDuration'] = snapDuration;
+    map['snapCurve'] = snapCurve;
 
     return map;
   }
@@ -354,14 +384,14 @@ class HQFloatingWindowConfig {
   // return a window frm config
   HQFloatingWindow to() {
     // will lose window instance
-    return HQFloatingWindow(id: id ?? "default", config: this);
+    return HQFloatingWindow(id: id ?? 'default', config: this);
   }
 
   Future<HQFloatingWindow?> create({
-    String? id = "default",
+    String? id = 'default',
     bool start = false,
   }) async {
-    assert(!(entry == "main" && route == null));
+    assert(!(entry == 'main' && route == null));
     return await HQFloatingService().createWindow(id, this, start: start);
   }
 

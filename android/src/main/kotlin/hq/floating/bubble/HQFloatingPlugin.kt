@@ -62,7 +62,6 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
       isMain = true
       engine = binding.flutterEngine
       FlutterEngineCache.getInstance().put(FLUTTER_ENGINE_CACHE_KEY, engine)
-      serviceChannelInstalled = HQFloatingService.installChannel(engine)
       Log.d(TAG, "[plugin] on attached to main engine")
     }
   }

@@ -9,20 +9,18 @@ class EventManager {
     _msgChannel.setMessageHandler((msg) {
       var map = msg as Map<dynamic, dynamic>?;
       if (map == null) {
-        log("[event] unsupported message, we except a map");
+        log('[event] unsupported message, we except a map');
+        return Future.value(null);
       }
-      var evt = HQFloatingEvent.fromMap(map!);
+      var evt = HQFloatingEvent.fromMap(map);
       var rs = sink(evt);
-      log("[event] handled event: ${evt.name}, handlers: ${rs.length}");
+      log('[event] handled event: ${evt.name}, handlers: ${rs.length}');
       return Future.value(null);
     });
   }
 
-  final Map<
-    String,
-    Map<String, Map<HQFloatingWindow, List<HQFloatingWindowListener>>>
-  >
-  _listeners = {};
+  final Map<String, Map<String, Map<HQFloatingWindow, List<HQFloatingWindowListener>>>> _listeners =
+      {};
 
   final Map<String, List<HQFloatingWindow>> _windows = {};
 
@@ -31,19 +29,23 @@ class EventManager {
   static final Map<String, EventManager> _instances = {};
 
   factory EventManager(
-    BasicMessageChannel _msgChannel, {
+    BasicMessageChannel msgChannel, {
     HQFloatingWindow? window,
   }) {
-    if (_instances[_msgChannel.name] == null) {
-      _instances[_msgChannel.name] = EventManager._(_msgChannel);
+    if (_instances[msgChannel.name] == null) {
+      _instances[msgChannel.name] = EventManager._(msgChannel);
     }
 
-    var current = _instances[_msgChannel.name]!;
+    var current = _instances[msgChannel.name]!;
 
     // store the window which create the event manager
     if (window != null) {
       if (current._windows[window.id] == null) current._windows[window.id] = [];
-      current._windows[window.id]!.add(window);
+      // Avoid accumulating duplicate references if the same window ends up
+      // constructing/registering an EventManager more than once.
+      if (!current._windows[window.id]!.contains(window)) {
+        current._windows[window.id]!.add(window);
+      }
     }
 
     // make sure one message channel only one event manager
@@ -79,7 +81,7 @@ class EventManager {
     HQFloatingWindowListener callback,
   ) {
     var key = type.name;
-    log("[event] register listener $key for $window");
+    log('[event] register listener $key for $window');
     // w.id -> w -> type -> [cb]
     if (_listeners[window.id] == null) _listeners[window.id] = {};
     if (_listeners[window.id]![key] == null) _listeners[window.id]![key] = {};
@@ -92,8 +94,39 @@ class EventManager {
     return this;
   }
 
+  EventManager off(
+    HQFloatingWindow window,
+    HQFloatingEventType type,
+    HQFloatingWindowListener callback,
+  ) {
+    var key = type.name;
+    log('[event] unregister listener $key for $window');
+    if (_listeners[window.id] != null &&
+        _listeners[window.id]![key] != null &&
+        _listeners[window.id]![key]![window] != null) {
+      _listeners[window.id]![key]![window]!.remove(callback);
+      if (_listeners[window.id]![key]![window]!.isEmpty) {
+        _listeners[window.id]![key]!.remove(window);
+      }
+      if (_listeners[window.id]![key]!.isEmpty) {
+        _listeners[window.id]!.remove(key);
+      }
+      if (_listeners[window.id]!.isEmpty) {
+        _listeners.remove(window.id);
+        _windows.remove(window.id);
+      }
+    }
+    return this;
+  }
+
+  EventManager clear(HQFloatingWindow window) {
+    _listeners.remove(window.id);
+    _windows.remove(window.id);
+    return this;
+  }
+
   @override
   String toString() {
-    return "EventManager@${super.hashCode}";
+    return 'EventManager@${super.hashCode}';
   }
 }

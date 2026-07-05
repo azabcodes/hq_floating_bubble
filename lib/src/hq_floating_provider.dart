@@ -5,11 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:hq_floating_bubble/hq_floating_bubble.dart';
 
-// typedef TransitionBuilder = Widget Function(BuildContext context, Widget? child);
-// typedef WidgetBuilder = Widget Function(BuildContext context);
-
 class HQFloatingProvider extends InheritedWidget {
   final HQFloatingWindow? window;
+  @override
   final Widget child;
 
   const HQFloatingProvider({
@@ -20,7 +18,7 @@ class HQFloatingProvider extends InheritedWidget {
 
   @override
   bool updateShouldNotify(HQFloatingProvider oldWidget) {
-    return true;
+    return oldWidget.window != window;
   }
 }
 
@@ -47,6 +45,7 @@ class _HQFloatingContainerState extends State<HQFloatingContainer> {
 
   var _ignorePointer = false;
   var _autosize = true;
+  HQFloatingWindowListener? _resumeListener;
 
   @override
   void initState() {
@@ -55,25 +54,24 @@ class _HQFloatingContainerState extends State<HQFloatingContainer> {
   }
 
   Future<void> initSyncState() async {
-    // send started message to service
-    // this make sure ui already
     if (_window == null) {
-      log("[provider] have not sync window at init, need to do at here");
-      await HQFloatingService().ensureWindow().then((w) => _window = w);
+      log('[provider] have not sync window at init, need to do at here');
+      final win = await HQFloatingService().ensureWindow();
+      if (!mounted) return;
+      _window = win;
     }
-    // init window from engine and save, only call this int here
-    // sync a window from engine
-    _changed();
-    _window?.on(HQFloatingEventType.WindowResumed, (w, _) => _changed());
+    await _changed();
+
+    if (!mounted) return;
+    _resumeListener = (w, _) => _changed();
+    _window?.on(HQFloatingEventType.WindowResumed, _resumeListener!);
   }
 
-  Widget _empty = Container();
+  static const Widget _empty = SizedBox.shrink();
 
   @override
   Widget build(BuildContext context) {
-    // make sure window is ready?
     if (!widget.debug && _window == null) return _empty;
-    // in production, make sure builder when window is ready
     return Builder(builder: widget.builder ?? (_) => widget.child!)
         ._provider(_window)
         ._autosize(enabled: _autosize, onChange: _onSizeChanged)
@@ -84,25 +82,49 @@ class _HQFloatingContainerState extends State<HQFloatingContainer> {
 
   @override
   void dispose() {
+    if (_resumeListener != null && _window != null) {
+      _window!.off(HQFloatingEventType.WindowResumed, _resumeListener!);
+    }
     super.dispose();
-    // TODO: remove event listener
-    // w.un("resumed").un("")
   }
 
   Future<void> _changed() async {
-    // clickable == !ignorePointer
-    _ignorePointer = !(_window?.config?.clickable ?? true);
-    _autosize = _window?.config?.autosize ?? true;
-    // update the flutter ui
+    final newIgnore = !(_window?.config?.clickable ?? true);
+    final newAutosize = _window?.config?.autosize ?? true;
+
+    if (newIgnore == _ignorePointer && newAutosize == _autosize) {
+      return;
+    }
+
+    _ignorePointer = newIgnore;
+    _autosize = newAutosize;
     if (mounted) setState(() {});
   }
 
+  Size? _lastSize;
+  int? _lastWidth;
+  int? _lastHeight;
+
   void _onSizeChanged(Size size) {
-    var radio = _window?.pixelRadio ?? 1;
+    if (_lastSize == size) return;
+    _lastSize = size;
+
+    final radio = _window?.pixelRadio ?? 1;
+
+    final width = (size.width * radio).round();
+    final height = (size.height * radio).round();
+
+    if (_lastWidth == width && _lastHeight == height) {
+      return;
+    }
+
+    _lastWidth = width;
+    _lastHeight = height;
+
     _window?.update(
       HQFloatingWindowConfig(
-        width: (size.width * radio).toInt(),
-        height: (size.height * radio).toInt(),
+        width: width,
+        height: height,
       ),
     );
   }
@@ -126,51 +148,58 @@ class _MeasuredSized extends StatefulWidget {
 }
 
 class _MeasuredSizedState extends State<_MeasuredSized> {
+  bool _scheduled = false;
+  Size? oldSize;
+
+  void _scheduleMeasure() {
+    if (_scheduled) return;
+    _scheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _scheduled = false;
+      postFrameCallback(Duration.zero);
+    });
+  }
+
   @override
   void initState() {
-    SchedulerBinding.instance.addPostFrameCallback(postFrameCallback);
     super.initState();
+    _scheduleMeasure();
   }
 
   @override
   Widget build(BuildContext context) {
     if (widget.onChange == null) return widget.child;
-    SchedulerBinding.instance.addPostFrameCallback(postFrameCallback);
+    _scheduleMeasure();
     return OverflowBox(
       minWidth: 0.0,
       minHeight: 0.0,
       maxWidth: double.infinity,
       maxHeight: double.infinity,
-      child: Container(
-        key: widgetKey,
-        child: NotificationListener<SizeChangedLayoutNotification>(
-          onNotification: (_) {
-            SchedulerBinding.instance.addPostFrameCallback(postFrameCallback);
-            return true;
-          },
-          child: SizeChangedLayoutNotifier(child: widget.child),
-        ),
+      child: NotificationListener<SizeChangedLayoutNotification>(
+        onNotification: (_) {
+          _scheduleMeasure();
+          return true;
+        },
+        child: SizeChangedLayoutNotifier(child: widget.child),
       ),
     );
   }
 
-  final widgetKey = GlobalKey();
-  Size? oldSize;
-
   void postFrameCallback(Duration _) async {
-    final ctx = widgetKey.currentContext;
-    if (ctx == null) return;
+    if (!mounted) return;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
 
     if (widget.delay > 0) {
       await Future<void>.delayed(Duration(milliseconds: widget.delay));
     }
-    if (mounted == false) return;
+    if (!mounted) return;
 
-    final newSize = ctx.size;
-    if (newSize == null || newSize == Size.zero) return;
-    // if (oldSize == newSize) return;
+    final newSize = box.size;
+    if (newSize == Size.zero) return;
+    if (oldSize == newSize) return;
     oldSize = newSize;
-    widget.onChange!(newSize);
+    widget.onChange?.call(newSize);
   }
 }
 
@@ -241,9 +270,7 @@ class _ResizeAnchor extends StatefulWidget {
   // ignore: unused_element
   final bool vertical;
 
-  const _ResizeAnchor({required this.child})
-    : horizontal = true,
-      vertical = true;
+  const _ResizeAnchor({required this.child}) : horizontal = true, vertical = true;
 
   @override
   State<_ResizeAnchor> createState() => __ResizeAnchorState();
@@ -255,17 +282,26 @@ class __ResizeAnchorState extends State<_ResizeAnchor> {
     return GestureDetector(
       onScaleStart: (v) {
         if (kDebugMode) {
-          print("=======> scale start $v");
+          log(
+            'scale update $v',
+            name: 'HQFloating',
+          );
         }
       },
       onScaleUpdate: (v) {
         if (kDebugMode) {
-          print("=======> scale update $v");
+          log(
+            'scale update $v',
+            name: 'HQFloating',
+          );
         }
       },
       onScaleEnd: (v) {
         if (kDebugMode) {
-          print("=======> scale end $v");
+          log(
+            'scale update $v',
+            name: 'HQFloating',
+          );
         }
       },
       child: widget.child,
@@ -302,9 +338,7 @@ extension WidgetProviderExtension on Widget {
     void Function(Size)? onChange,
     int delay = 0,
   }) {
-    return !enabled
-        ? this
-        : _MeasuredSized(delay: delay, onChange: onChange, child: this);
+    return !enabled ? this : _MeasuredSized(delay: delay, onChange: onChange, child: this);
   }
 
   Widget _pointerless([bool ignoring = false]) {
@@ -321,7 +355,14 @@ extension WidgetProviderExtension on Widget {
         : MaterialApp(
             debugShowCheckedModeBanner: debug,
             scrollBehavior: const ScrollBehavior().copyWith(overscroll: false),
-            home: this,
+            theme: ThemeData(
+              useMaterial3: false,
+              splashFactory: InkRipple.splashFactory,
+            ),
+            home: Scaffold(
+              backgroundColor: Colors.transparent,
+              body: this,
+            ),
           );
   }
 }

@@ -34,7 +34,7 @@ class HQFloatingService {
     // });
   }
 
-  static const String channelID = "hq.floating.bubble";
+  static const String channelID = 'hq.floating.bubble';
 
   static final MethodChannel _channel = MethodChannel('$channelID/method');
 
@@ -67,7 +67,7 @@ class HQFloatingService {
 
   /// _windows for the main engine to manage the windows started
   /// items added by start function
-  Map<String, HQFloatingWindow> _windows = {};
+  final Map<String, HQFloatingWindow> _windows = {};
 
   /// reutrn all windows only works for main engine
   Map<String, HQFloatingWindow> get windows =>
@@ -95,8 +95,8 @@ class HQFloatingService {
 
   /// sync make the plugin to sync windows from services
   Future<bool> syncWindows() async {
-    var _ws = await _channel.invokeListMethod("plugin.sync_windows");
-    _ws?.forEach((e) {
+    var ws = await _channel.invokeListMethod('plugin.sync_windows');
+    ws?.forEach((e) {
       var w = HQFloatingWindow.fromMap(e);
       _windows[w.id] = w;
     });
@@ -130,81 +130,81 @@ class HQFloatingService {
     );
   }
 
-  Future<bool> initialize() async {
-    if (_inited) return false;
+  Future<bool> initialize({bool force = false}) async {
+    if (_inited && !force) return false;
     _inited = true;
 
     final systemConfig = await _getValidSystemConfig();
     final view = PlatformDispatcher.instance.implicitView;
 
-    var map = await _channel.invokeMapMethod("plugin.initialize", {
-      "pixelRadio": view?.devicePixelRatio ?? 1.0,
-      "system": systemConfig.toMap(),
+    var map = await _channel.invokeMapMethod('plugin.initialize', {
+      'pixelRadio': view?.devicePixelRatio ?? 1.0,
+      'system': systemConfig.toMap(),
     });
 
-    log("[plugin] initialize result: $map");
+    log('[plugin] initialize result: $map');
 
-    _serviceRunning = map?["service_running"];
-    _permissionGranted = map?["permission_grated"];
+    _serviceRunning = map?['service_running'];
+    _permissionGranted = map?['permission_grated'];
 
-    var ws = map?["windows"] as List<dynamic>?;
+    var ws = map?['windows'] as List<dynamic>?;
     ws?.forEach((e) {
       var w = HQFloatingWindow.fromMap(e);
       _windows[w.id] = w;
     });
 
-    log("[plugin] there are ${_windows.length} windows already started");
+    log('[plugin] there are ${_windows.length} windows already started');
 
     return true;
   }
 
   Future<bool> checkPermission() async {
-    return await _channel.invokeMethod("plugin.has_permission");
+    return await _channel.invokeMethod('plugin.has_permission');
   }
 
   Future<bool> openPermissionSetting() async {
-    return await _channel.invokeMethod("plugin.open_permission_setting");
+    return await _channel.invokeMethod('plugin.open_permission_setting');
   }
 
   Future<bool> isServiceRunning() async {
-    return await _channel.invokeMethod("plugin.is_service_running");
+    return await _channel.invokeMethod('plugin.is_service_running');
   }
 
   Future<bool> startService() async {
-    return await _channel.invokeMethod("plugin.start_service");
+    return await _channel.invokeMethod('plugin.start_service');
   }
 
   Future<bool> cleanCache() async {
-    return await _channel.invokeMethod("plugin.clean_cache");
+    return await _channel.invokeMethod('plugin.clean_cache');
   }
 
   /// Promote the background service to a foreground service with custom notification info.
   Future<bool> promoteService({
-    String title = "HQFloating Service",
-    String description = "HQFloating service is running",
+    String title = 'HQFloating Service',
+    String description = 'HQFloating service is running',
     String? icon,
     bool showWhen = false,
     String? ticker,
     String? subText,
   }) async {
-    return await _channel.invokeMethod("service.promote", {
-      "title": title,
-      "description": description,
-      "icon": icon,
-      "showWhen": showWhen,
-      "ticker": ticker,
-      "subText": subText,
+    return await _channel.invokeMethod('service.promote', {
+      'title': title,
+      'description': description,
+      'icon': icon,
+      'showWhen': showWhen,
+      'ticker': ticker,
+      'subText': subText,
     });
   }
 
   /// Demote the foreground service back to background.
   Future<bool> demoteService() async {
-    return await _channel.invokeMethod("service.demote");
+    return await _channel.invokeMethod('service.demote');
   }
 
   /// Control whether the foreground service holds system WakeLock.
   Future<bool> setWakeLock(bool enabled) async {
-    return await _channel.invokeMethod("service.set_wakelock", {"enabled": enabled});
+    return await _channel.invokeMethod('service.set_wakelock', {'enabled': enabled});
   }
 
   /// create window to create a window
@@ -245,12 +245,12 @@ class HQFloatingService {
     bool start = false, // start immediately if true
     HQFloatingWindow? window,
     required MethodChannel channel,
-    String name = "plugin.create_window",
+    String name = 'plugin.create_window',
   }) async {
     // check permission first
     if (!await checkPermission()) {
       throw HQFloatingPermissionException(
-        "No permission to create overlay window.",
+        'No permission to create overlay window.',
       );
     }
 
@@ -259,14 +259,12 @@ class HQFloatingService {
     // for main engine use
     // if (window != null) _windows[window.id] = window;
     var updates = await channel.invokeMapMethod(name, {
-      "id": id,
-      "config": config.toMap(),
-      "start": start,
+      'id': id,
+      'config': config.toMap(),
+      'start': start,
     });
     // if window is not created, new one
-    return updates == null
-        ? null
-        : (window ?? HQFloatingWindow()).applyMap(updates);
+    return updates == null ? null : (window ?? HQFloatingWindow()).applyMap(updates);
   }
 
   /// ensure window make sure the window object sync from android
@@ -280,7 +278,7 @@ class HQFloatingService {
     // window object don't have sync method, we must do at here
     // assert if you are in main engine should call this
     var map = await HQFloatingWindow.sync();
-    log("[window] sync window object from android: $map");
+    log('[window] sync window object from android: $map');
     if (map == null) return null;
     // store current window if needed
     // use the static window first
