@@ -1,4 +1,3 @@
-import 'dart:ui';
 import '../enums/hq_floating_gravity_type.dart';
 
 extension HQFloatingGravityTypeConverter on HQFloatingGravityType {
@@ -31,16 +30,5 @@ extension HQFloatingGravityTypeConverter on HQFloatingGravityType {
       orElse: () => HQFloatingGravityType.unknown,
     );
     return r == HQFloatingGravityType.unknown ? null : r;
-  }
-
-  /// convert offset in topleft to others
-  Offset apply(Offset o, {required double width, required double height}) {
-    var v = toInt();
-    if (v == null) return o;
-
-    var dx = o.dx;
-    var dy = o.dy;
-
-    return Offset(dx, dy);
   }
 }

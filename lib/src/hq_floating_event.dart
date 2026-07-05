@@ -28,28 +28,11 @@ class EventManager {
 
   static final Map<String, EventManager> _instances = {};
 
-  factory EventManager(
-    BasicMessageChannel msgChannel, {
-    HQFloatingWindow? window,
-  }) {
+  factory EventManager(BasicMessageChannel msgChannel) {
     if (_instances[msgChannel.name] == null) {
       _instances[msgChannel.name] = EventManager._(msgChannel);
     }
-
-    var current = _instances[msgChannel.name]!;
-
-    // store the window which create the event manager
-    if (window != null) {
-      if (current._windows[window.id] == null) current._windows[window.id] = [];
-      // Avoid accumulating duplicate references if the same window ends up
-      // constructing/registering an EventManager more than once.
-      if (!current._windows[window.id]!.contains(window)) {
-        current._windows[window.id]!.add(window);
-      }
-    }
-
-    // make sure one message channel only one event manager
-    return current;
+    return _instances[msgChannel.name]!;
   }
 
   List<dynamic> sink(HQFloatingEvent evt) {
@@ -82,6 +65,12 @@ class EventManager {
   ) {
     var key = type.name;
     log('[event] register listener $key for $window');
+    
+    if (_windows[window.id] == null) _windows[window.id] = [];
+    if (!_windows[window.id]!.contains(window)) {
+      _windows[window.id]!.add(window);
+    }
+
     // w.id -> w -> type -> [cb]
     if (_listeners[window.id] == null) _listeners[window.id] = {};
     if (_listeners[window.id]![key] == null) _listeners[window.id]![key] = {};

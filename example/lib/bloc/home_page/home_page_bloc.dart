@@ -1,0 +1,134 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:equatable/equatable.dart';
+import 'package:hq_floating_bubble/hq_floating_bubble.dart';
+
+part 'home_page_event.dart';
+part 'home_page_state.dart';
+
+class HomePageBloc extends Bloc<HomePageEvent, HomePageState> {
+  List<HQFloatingWindowConfig> _configs = const [];
+
+  HomePageBloc() : super(const HomePageState()) {
+    on<InitializeServiceAndWindows>(_onInitialize);
+    on<RefreshServiceStatus>(_onRefreshServiceStatus);
+    on<OpenWindowRequested>(_onOpenWindow);
+    on<CloseWindowRequested>(_onCloseWindow);
+  }
+
+  Future<void> _onInitialize(
+    InitializeServiceAndWindows event,
+    Emitter<HomePageState> emit,
+  ) async {
+    _configs = event.configs;
+    emit(state.copyWith(loading: true, errorMessage: null));
+    await _initializeFlow(emit);
+  }
+
+  Future<void> _onRefreshServiceStatus(
+    RefreshServiceStatus event,
+    Emitter<HomePageState> emit,
+  ) async {
+    emit(state.copyWith(loading: true, errorMessage: null));
+    await _initializeFlow(emit);
+  }
+
+  Future<void> _initializeFlow(Emitter<HomePageState> emit) async {
+    try {
+      // Force kill the background service on startup/hot-restart during development
+      // to ensure all sub-engine isolates are recreated with fresh code.
+      if (kDebugMode) {
+        try {
+          await HQFloatingService().stopService();
+        } catch (_) {}
+      }
+
+      await HQFloatingService().initialize(force: true);
+
+      final hasPermission = await HQFloatingService().checkPermission();
+      if (!hasPermission) {
+        emit(state.copyWith(
+          loading: false,
+          hasPermission: false,
+          ready: false,
+        ));
+        HQFloatingService().openPermissionSetting();
+        return;
+      }
+
+      final serviceRunning = await HQFloatingService().isServiceRunning();
+      if (!serviceRunning) {
+        await HQFloatingService().startService();
+      }
+
+      // Populate initial windows
+      final List<HQFloatingWindow> windows = [];
+      for (var c in _configs) {
+        windows.add(c.to());
+      }
+
+      emit(state.copyWith(
+        windows: windows,
+        hasPermission: true,
+      ));
+
+      // Attempt to create windows
+      final Map<String, bool> readys = Map.from(state.readys);
+      for (int i = 0; i < windows.length; i++) {
+        final w = windows[i];
+        final existing = HQFloatingService().windows[w.id];
+        if (existing != null) {
+          windows[i] = existing;
+          readys[existing.id] = true;
+          continue;
+        }
+
+        try {
+          final createdWindow = await w.create();
+          if (createdWindow != null) {
+            windows[i] = createdWindow;
+            readys[createdWindow.id] = true;
+          }
+        } catch (e, st) {
+          debugPrint('Failed to create window "${w.id}": $e\n$st');
+        }
+      }
+
+      emit(state.copyWith(
+        loading: false,
+        ready: true,
+        windows: windows,
+        readys: readys,
+      ));
+    } catch (e, st) {
+      debugPrint('Failed to initialize floating overlays: $e\n$st');
+      emit(state.copyWith(
+        loading: false,
+        ready: false,
+        errorMessage: e.toString(),
+      ));
+    }
+  }
+
+  Future<void> _onOpenWindow(OpenWindowRequested event, Emitter<HomePageState> emit) async {
+    try {
+      await event.window.start();
+    } catch (e) {
+      debugPrint('Failed to open window "${event.window.id}": $e');
+    }
+  }
+
+  Future<void> _onCloseWindow(CloseWindowRequested event, Emitter<HomePageState> emit) async {
+    final w = event.window;
+    try {
+      await w.share('close');
+    } catch (e) {
+      debugPrint('Failed to notify window "${w.id}" before closing: $e');
+    }
+    try {
+      await w.close();
+    } catch (e) {
+      debugPrint('Failed to close window "${w.id}": $e');
+    }
+  }
+}

@@ -1,17 +1,6 @@
 import '../enums/hq_floating_event_type.dart';
 
 extension HQFloatingEventTypeExtension on HQFloatingEventType {
-  static final _names = {
-    HQFloatingEventType.WindowCreated: "window.created",
-    HQFloatingEventType.WindowStarted: "window.started",
-    HQFloatingEventType.WindowPaused: "window.paused",
-    HQFloatingEventType.WindowResumed: "window.resumed",
-    HQFloatingEventType.WindowDestroy: "window.destroy",
-    HQFloatingEventType.WindowDragStart: "window.drag_start",
-    HQFloatingEventType.WindowDragging: "window.dragging",
-    HQFloatingEventType.WindowDragEnd: "window.drag_end",
-  };
-
   /// Parse event type from string (reserved for future use)
   static HQFloatingEventType? fromString(String v) {
     try {
@@ -21,5 +10,14 @@ extension HQFloatingEventTypeExtension on HQFloatingEventType {
     }
   }
 
-  String get name => _names[this]!;
+  String get name => switch (this) {
+    HQFloatingEventType.WindowCreated => 'window.created',
+    HQFloatingEventType.WindowStarted => 'window.started',
+    HQFloatingEventType.WindowPaused => 'window.paused',
+    HQFloatingEventType.WindowResumed => 'window.resumed',
+    HQFloatingEventType.WindowDestroy => 'window.destroy',
+    HQFloatingEventType.WindowDragStart => 'window.drag_start',
+    HQFloatingEventType.WindowDragging => 'window.dragging',
+    HQFloatingEventType.WindowDragEnd => 'window.drag_end',
+  };
 }

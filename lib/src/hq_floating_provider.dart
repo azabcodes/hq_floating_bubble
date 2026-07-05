@@ -356,7 +356,6 @@ extension WidgetProviderExtension on Widget {
             debugShowCheckedModeBanner: debug,
             scrollBehavior: const ScrollBehavior().copyWith(overscroll: false),
             theme: ThemeData(
-              useMaterial3: false,
               splashFactory: InkRipple.splashFactory,
             ),
             home: Scaffold(

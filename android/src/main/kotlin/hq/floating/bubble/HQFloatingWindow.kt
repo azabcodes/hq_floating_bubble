@@ -81,6 +81,8 @@ class HQFloatingWindow(
     fun destroy(force: Boolean = true): Boolean {
         Log.i(TAG, "[window] destroy window: $key force: $force")
 
+        view.animate().cancel()
+
         // remote from manager must be first
         try {
             if (_started) wm.removeView(view)
@@ -138,9 +140,20 @@ class HQFloatingWindow(
 
     fun update(cfg: Config): Map<String, Any?> {
         Log.d(TAG, "[window] update window $key => $cfg")
+        val oldX = layoutParams.x
+        val oldY = layoutParams.y
+        val oldWidth = layoutParams.width
+        val oldHeight = layoutParams.height
+        val oldGravity = layoutParams.gravity
+
         config = config.update(cfg).also {
-            layoutParams = it.to()
-            if (_started) wm.updateViewLayout(view, layoutParams)
+            val newParams = it.to()
+            if (newParams.x != oldX || newParams.y != oldY || 
+                newParams.width != oldWidth || newParams.height != oldHeight || 
+                newParams.gravity != oldGravity) {
+                layoutParams = newParams
+                if (_started) wm.updateViewLayout(view, layoutParams)
+            }
         }
         return toMap()
     }
@@ -291,7 +304,11 @@ class HQFloatingWindow(
             }
             "data.share" -> {
                 // communicate with other window, only 1 - 1 with id
-                val args = call.arguments as Map<*, *>
+                val args = call.arguments as? Map<*, *>
+                if (args == null) {
+                    Log.d(TAG, "[window] data.share called with invalid/missing arguments")
+                    return result.error("invalid_args", "Expected a map for data.share", null)
+                }
                 val targetId = call.argument<String?>("target")
                 Log.d(TAG, "[window] share data from $key with $targetId: $args")
                 if (targetId == null) {
@@ -431,15 +448,17 @@ class HQFloatingWindow(
                 }
 
                 dragging = true
-                // update x, y
-                update(Config().apply {
-                    x = constrainedX
-                    y = constrainedY
-                })
+                
+                // Keep local layoutParams updated
+                layoutParams.x = constrainedX
+                layoutParams.y = constrainedY
 
-                // Throttle dragging event emission (max once every 16ms)
+                // Throttle visual layout update and dragging event (max once every 16ms)
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastDragEmitTime >= 16) {
+                    if (_started) {
+                        wm.updateViewLayout(view, layoutParams)
+                    }
                     emit("dragging", listOf(constrainedX, constrainedY))
                     lastDragEmitTime = currentTime
                 }
@@ -447,6 +466,12 @@ class HQFloatingWindow(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 // touch end
                 if (dragging) {
+                    // Ensure final position is applied and emitted before snapping
+                    if (_started) {
+                        wm.updateViewLayout(view, layoutParams)
+                    }
+                    emit("dragging", listOf(layoutParams.x, layoutParams.y))
+                    
                     if (config.magnet != false) {
                         // magnet effect snapping to horizontal edge
                         val targetX = if (layoutParams.x + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)

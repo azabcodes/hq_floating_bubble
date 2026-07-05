@@ -1,0 +1,1601 @@
+=============================
+  Kotlin files collection
+  2026-07-06 01:33:45
+=============================
+
+########################################
+# FILE: bloc/assistive_pannel/assistive_pannel_bloc.dart
+########################################
+
+import 'dart:async';
+
+import 'package:equatable/equatable.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:hq_floating_bubble/hq_floating_bubble.dart';
+
+part 'assistive_pannel_event.dart';
+part 'assistive_pannel_state.dart';
+
+class AssistivePannelBloc extends Bloc<AssistivePannelEvent, AssistivePannelState> {
+  final Duration duration = const Duration(milliseconds: 250);
+
+  HQFloatingWindow? window;
+  HQFloatingWindowListener? _startedListener;
+  HQFloatingWindowListener? _resumedListener;
+
+  Timer? _closeTimer;
+  Timer? _safetyTimer;
+
+  AssistivePannelBloc() : super(const AssistivePannelState()) {
+    on<UpdatePannelWindow>(_onUpdateWindow);
+    on<PannelTouchPositionUpdated>(_onPositionUpdated);
+    on<PannelStarted>(_onStarted);
+    on<PannelResumed>(_onResumed);
+    on<EnableTapOutside>(_onEnableTapOutside);
+    on<ClosePannelRequested>(_onCloseRequested);
+  }
+
+  void _onUpdateWindow(
+    UpdatePannelWindow event,
+    Emitter<AssistivePannelState> emit,
+  ) {
+    final newWindow = event.newWindow;
+
+    if (identical(newWindow, window)) {
+      return;
+    }
+
+    if (window != null) {
+      if (_startedListener != null) {
+        window!.off(
+          HQFloatingEventType.WindowStarted,
+          _startedListener!,
+        );
+      }
+
+      if (_resumedListener != null) {
+        window!.off(
+          HQFloatingEventType.WindowResumed,
+          _resumedListener!,
+        );
+      }
+
+      window!.offData();
+    }
+
+    window = newWindow;
+
+    _closeTimer?.cancel();
+    _safetyTimer?.cancel();
+
+    emit(
+      state.copyWith(
+        closing: false,
+        show: false,
+        canTapOutside: false,
+      ),
+    );
+
+    _startedListener = (_, _) {
+      add(PannelStarted());
+    };
+
+    _resumedListener = (_, _) {
+      add(PannelResumed());
+    };
+
+    window
+        ?.on(
+          HQFloatingEventType.WindowStarted,
+          _startedListener!,
+        )
+        .on(
+          HQFloatingEventType.WindowResumed,
+          _resumedListener!,
+        )
+        .onData((source, name, data) async {
+          if (data is! List || data.length < 2) {
+            return;
+          }
+
+          final x = (data[0] as num).toDouble();
+          final y = (data[1] as num).toDouble();
+
+          add(
+            PannelTouchPositionUpdated(
+              x,
+              y,
+            ),
+          );
+        });
+  }
+
+  void _onPositionUpdated(PannelTouchPositionUpdated event, Emitter<AssistivePannelState> emit) {
+    emit(state.copyWith(touchX: event.x, touchY: event.y));
+  }
+
+  void _onStarted(PannelStarted event, Emitter<AssistivePannelState> emit) {
+    _closeTimer?.cancel();
+    _safetyTimer?.cancel();
+    emit(
+      state.copyWith(
+        show: true,
+        closing: false,
+        canTapOutside: false,
+      ),
+    );
+    _safetyTimer = Timer(const Duration(milliseconds: 300), () {
+      add(EnableTapOutside());
+    });
+  }
+
+  void _onResumed(PannelResumed event, Emitter<AssistivePannelState> emit) {
+    _closeTimer?.cancel();
+    _safetyTimer?.cancel();
+    emit(
+      state.copyWith(
+        show: true,
+        closing: false,
+        canTapOutside: false,
+      ),
+    );
+    _safetyTimer = Timer(const Duration(milliseconds: 300), () {
+      add(EnableTapOutside());
+    });
+  }
+
+  void _onEnableTapOutside(EnableTapOutside event, Emitter<AssistivePannelState> emit) {
+    emit(state.copyWith(canTapOutside: true));
+  }
+
+  void _onCloseRequested(ClosePannelRequested event, Emitter<AssistivePannelState> emit) {
+    if (!state.canTapOutside) return;
+    if (state.closing) return;
+
+    emit(state.copyWith(closing: true, show: false));
+
+    _closeTimer?.cancel();
+    _closeTimer = Timer(duration, () {
+      window?.close();
+    });
+  }
+
+  @override
+  Future<void> close() {
+    _closeTimer?.cancel();
+    _safetyTimer?.cancel();
+    if (window != null) {
+      if (_startedListener != null) {
+        window!.off(HQFloatingEventType.WindowStarted, _startedListener!);
+      }
+      if (_resumedListener != null) {
+        window!.off(HQFloatingEventType.WindowResumed, _resumedListener!);
+      }
+      window!.offData();
+    }
+    return super.close();
+  }
+}
+
+
+########################################
+# FILE: bloc/assistive_pannel/assistive_pannel_event.dart
+########################################
+
+part of 'assistive_pannel_bloc.dart';
+
+abstract class AssistivePannelEvent extends Equatable {
+  const AssistivePannelEvent();
+
+  @override
+  List<Object?> get props => [];
+}
+
+class UpdatePannelWindow extends AssistivePannelEvent {
+  final HQFloatingWindow? newWindow;
+
+  const UpdatePannelWindow(this.newWindow);
+
+  @override
+  List<Object?> get props => [newWindow];
+}
+
+class PannelTouchPositionUpdated extends AssistivePannelEvent {
+  final double x;
+  final double y;
+
+  const PannelTouchPositionUpdated(this.x, this.y);
+
+  @override
+  List<Object?> get props => [x, y];
+}
+
+class PannelStarted extends AssistivePannelEvent {}
+
+class PannelResumed extends AssistivePannelEvent {}
+
+class EnableTapOutside extends AssistivePannelEvent {}
+
+class ClosePannelRequested extends AssistivePannelEvent {}
+
+
+########################################
+# FILE: bloc/assistive_pannel/assistive_pannel_state.dart
+########################################
+
+part of 'assistive_pannel_bloc.dart';
+
+class AssistivePannelState extends Equatable {
+  final bool show;
+  final bool closing;
+  final bool canTapOutside;
+  final double touchX;
+  final double touchY;
+
+  const AssistivePannelState({
+    this.show = false,
+    this.closing = false,
+    this.canTapOutside = false,
+    this.touchX = 0.0,
+    this.touchY = 0.0,
+  });
+
+  AssistivePannelState copyWith({
+    bool? show,
+    bool? closing,
+    bool? canTapOutside,
+    double? touchX,
+    double? touchY,
+  }) {
+    return AssistivePannelState(
+      show: show ?? this.show,
+      closing: closing ?? this.closing,
+      canTapOutside: canTapOutside ?? this.canTapOutside,
+      touchX: touchX ?? this.touchX,
+      touchY: touchY ?? this.touchY,
+    );
+  }
+
+  @override
+  List<Object?> get props => [show, closing, canTapOutside, touchX, touchY];
+}
+
+
+########################################
+# FILE: bloc/assistive_touch/assistive_touch_bloc.dart
+########################################
+
+import 'dart:async';
+
+import 'package:equatable/equatable.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:hq_floating_bubble/hq_floating_bubble.dart';
+
+part 'assistive_touch_event.dart';
+part 'assistive_touch_state.dart';
+
+class AssistiveTouchBloc extends Bloc<AssistiveTouchEvent, AssistiveTouchState> {
+  HQFloatingWindow? pannelWindow;
+  HQFloatingWindow? touchWindow;
+
+  final Completer<void> _pannelReadyCompleter = Completer<void>();
+
+  HQFloatingWindowListener? _touchStartedListener;
+  HQFloatingWindowListener? _pannelCreatedListener;
+  HQFloatingWindowListener? _pannelPausedListener;
+
+  AssistiveTouchBloc() : super(const AssistiveTouchState()) {
+    on<InitializeAssistiveTouch>(_onInitialize);
+    on<PanelReadyUpdated>(_onPanelReadyUpdated);
+    on<TouchWindowStarted>(_onTouchWindowStarted);
+    on<OpenPanelRequested>(_onOpenPanel);
+  }
+
+  void _onInitialize(InitializeAssistiveTouch event, Emitter<AssistiveTouchState> emit) {
+    touchWindow = event.touchWindow;
+
+    _touchStartedListener = (window, data) {
+      add(TouchWindowStarted());
+    };
+    touchWindow?.on(HQFloatingEventType.WindowStarted, _touchStartedListener!);
+
+    pannelWindow = HQFloatingWindowConfig(
+      id: 'assistive_pannel',
+      callback: event.pannelMainCallback,
+      width: HQFloatingWindowSize.matchParent,
+      height: HQFloatingWindowSize.matchParent,
+      autosize: false,
+    ).to();
+
+    pannelWindow?.create();
+
+    _pannelCreatedListener = (window, data) {
+      add(const PanelReadyUpdated(true));
+      if (!_pannelReadyCompleter.isCompleted) {
+        _pannelReadyCompleter.complete();
+      }
+    };
+
+    _pannelPausedListener = (window, data) {
+      touchWindow?.start();
+    };
+
+    pannelWindow
+        ?.on(HQFloatingEventType.WindowCreated, _pannelCreatedListener!)
+        .on(HQFloatingEventType.WindowPaused, _pannelPausedListener!);
+  }
+
+  void _onPanelReadyUpdated(PanelReadyUpdated event, Emitter<AssistiveTouchState> emit) {
+    emit(state.copyWith(pannelReady: event.isReady));
+  }
+
+  void _onTouchWindowStarted(TouchWindowStarted event, Emitter<AssistiveTouchState> emit) {
+    emit(state.copyWith(expend: false));
+  }
+
+  Future<void> _onOpenPanel(
+    OpenPanelRequested event,
+    Emitter<AssistiveTouchState> emit,
+  ) async {
+    if (state.opening) return;
+
+    emit(state.copyWith(opening: true));
+
+    try {
+      if (!state.pannelReady) {
+        await _pannelReadyCompleter.future;
+      }
+
+      final startedCompleter = Completer<void>();
+      void startedListener(window, data) {
+        if (!startedCompleter.isCompleted) {
+          startedCompleter.complete();
+        }
+      }
+
+      pannelWindow?.on(HQFloatingEventType.WindowStarted, startedListener);
+
+      await pannelWindow?.start();
+
+      await Future.any([
+        startedCompleter.future,
+        Future.delayed(const Duration(milliseconds: 500)),
+      ]);
+
+      pannelWindow?.off(HQFloatingEventType.WindowStarted, startedListener);
+
+      await pannelWindow?.share([
+        event.x,
+        event.y,
+      ]);
+
+      emit(state.copyWith(expend: true));
+    } finally {
+      emit(state.copyWith(opening: false));
+    }
+  }
+
+  @override
+  Future<void> close() {
+    if (touchWindow != null && _touchStartedListener != null) {
+      touchWindow!.off(HQFloatingEventType.WindowStarted, _touchStartedListener!);
+    }
+    if (pannelWindow != null) {
+      if (_pannelCreatedListener != null) {
+        pannelWindow!.off(HQFloatingEventType.WindowCreated, _pannelCreatedListener!);
+      }
+      if (_pannelPausedListener != null) {
+        pannelWindow!.off(HQFloatingEventType.WindowPaused, _pannelPausedListener!);
+      }
+    }
+    return super.close();
+  }
+}
+
+
+########################################
+# FILE: bloc/assistive_touch/assistive_touch_event.dart
+########################################
+
+part of 'assistive_touch_bloc.dart';
+
+abstract class AssistiveTouchEvent extends Equatable {
+  const AssistiveTouchEvent();
+
+  @override
+  List<Object?> get props => [];
+}
+
+class InitializeAssistiveTouch extends AssistiveTouchEvent {
+  final HQFloatingWindow? touchWindow;
+  final VoidCallback pannelMainCallback;
+
+  const InitializeAssistiveTouch({
+    required this.touchWindow,
+    required this.pannelMainCallback,
+  });
+
+  @override
+  List<Object?> get props => [touchWindow, pannelMainCallback];
+}
+
+class PanelReadyUpdated extends AssistiveTouchEvent {
+  final bool isReady;
+
+  const PanelReadyUpdated(this.isReady);
+
+  @override
+  List<Object?> get props => [isReady];
+}
+
+class TouchWindowStarted extends AssistiveTouchEvent {}
+
+class OpenPanelRequested extends AssistiveTouchEvent {
+  final double x;
+  final double y;
+
+  const OpenPanelRequested({required this.x, required this.y});
+
+  @override
+  List<Object?> get props => [x, y];
+}
+
+
+########################################
+# FILE: bloc/assistive_touch/assistive_touch_state.dart
+########################################
+
+part of 'assistive_touch_bloc.dart';
+
+class AssistiveTouchState extends Equatable {
+  final bool expend;
+  final bool pannelReady;
+  final bool opening;
+
+  const AssistiveTouchState({
+    this.expend = false,
+    this.pannelReady = false,
+    this.opening = false,
+  });
+
+  AssistiveTouchState copyWith({
+    bool? expend,
+    bool? pannelReady,
+    bool? opening,
+  }) {
+    return AssistiveTouchState(
+      expend: expend ?? this.expend,
+      pannelReady: pannelReady ?? this.pannelReady,
+      opening: opening ?? this.opening,
+    );
+  }
+
+  @override
+  List<Object?> get props => [expend, pannelReady, opening];
+}
+
+
+########################################
+# FILE: bloc/home_page/home_page_bloc.dart
+########################################
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:equatable/equatable.dart';
+import 'package:hq_floating_bubble/hq_floating_bubble.dart';
+
+part 'home_page_event.dart';
+part 'home_page_state.dart';
+
+class HomePageBloc extends Bloc<HomePageEvent, HomePageState> {
+  List<HQFloatingWindowConfig> _configs = const [];
+
+  HomePageBloc() : super(const HomePageState()) {
+    on<InitializeServiceAndWindows>(_onInitialize);
+    on<RefreshServiceStatus>(_onRefreshServiceStatus);
+    on<OpenWindowRequested>(_onOpenWindow);
+    on<CloseWindowRequested>(_onCloseWindow);
+  }
+
+  Future<void> _onInitialize(
+    InitializeServiceAndWindows event,
+    Emitter<HomePageState> emit,
+  ) async {
+    _configs = event.configs;
+    emit(state.copyWith(loading: true, errorMessage: null));
+    await _initializeFlow(emit);
+  }
+
+  Future<void> _onRefreshServiceStatus(
+    RefreshServiceStatus event,
+    Emitter<HomePageState> emit,
+  ) async {
+    emit(state.copyWith(loading: true, errorMessage: null));
+    await _initializeFlow(emit);
+  }
+
+  Future<void> _initializeFlow(Emitter<HomePageState> emit) async {
+    try {
+      // Force kill the background service on startup/hot-restart during development
+      // to ensure all sub-engine isolates are recreated with fresh code.
+      if (kDebugMode) {
+        try {
+          await HQFloatingService().stopService();
+        } catch (_) {}
+      }
+
+      await HQFloatingService().initialize(force: true);
+
+      final hasPermission = await HQFloatingService().checkPermission();
+      if (!hasPermission) {
+        emit(state.copyWith(
+          loading: false,
+          hasPermission: false,
+          ready: false,
+        ));
+        HQFloatingService().openPermissionSetting();
+        return;
+      }
+
+      final serviceRunning = await HQFloatingService().isServiceRunning();
+      if (!serviceRunning) {
+        await HQFloatingService().startService();
+      }
+
+      // Populate initial windows
+      final List<HQFloatingWindow> windows = [];
+      for (var c in _configs) {
+        windows.add(c.to());
+      }
+
+      emit(state.copyWith(
+        windows: windows,
+        hasPermission: true,
+      ));
+
+      // Attempt to create windows
+      final Map<String, bool> readys = Map.from(state.readys);
+      for (int i = 0; i < windows.length; i++) {
+        final w = windows[i];
+        final existing = HQFloatingService().windows[w.id];
+        if (existing != null) {
+          windows[i] = existing;
+          readys[existing.id] = true;
+          continue;
+        }
+
+        try {
+          final createdWindow = await w.create();
+          if (createdWindow != null) {
+            windows[i] = createdWindow;
+            readys[createdWindow.id] = true;
+          }
+        } catch (e, st) {
+          debugPrint('Failed to create window "${w.id}": $e\n$st');
+        }
+      }
+
+      emit(state.copyWith(
+        loading: false,
+        ready: true,
+        windows: windows,
+        readys: readys,
+      ));
+    } catch (e, st) {
+      debugPrint('Failed to initialize floating overlays: $e\n$st');
+      emit(state.copyWith(
+        loading: false,
+        ready: false,
+        errorMessage: e.toString(),
+      ));
+    }
+  }
+
+  Future<void> _onOpenWindow(OpenWindowRequested event, Emitter<HomePageState> emit) async {
+    try {
+      await event.window.start();
+    } catch (e) {
+      debugPrint('Failed to open window "${event.window.id}": $e');
+    }
+  }
+
+  Future<void> _onCloseWindow(CloseWindowRequested event, Emitter<HomePageState> emit) async {
+    final w = event.window;
+    try {
+      await w.share('close');
+    } catch (e) {
+      debugPrint('Failed to notify window "${w.id}" before closing: $e');
+    }
+    try {
+      await w.close();
+    } catch (e) {
+      debugPrint('Failed to close window "${w.id}": $e');
+    }
+  }
+}
+
+
+########################################
+# FILE: bloc/home_page/home_page_event.dart
+########################################
+
+part of 'home_page_bloc.dart';
+
+abstract class HomePageEvent extends Equatable {
+  const HomePageEvent();
+
+  @override
+  List<Object?> get props => [];
+}
+
+class InitializeServiceAndWindows extends HomePageEvent {
+  final List<HQFloatingWindowConfig> configs;
+
+  const InitializeServiceAndWindows(this.configs);
+
+  @override
+  List<Object?> get props => [configs];
+}
+
+class RefreshServiceStatus extends HomePageEvent {}
+
+class OpenWindowRequested extends HomePageEvent {
+  final HQFloatingWindow window;
+
+  const OpenWindowRequested(this.window);
+
+  @override
+  List<Object?> get props => [window];
+}
+
+class CloseWindowRequested extends HomePageEvent {
+  final HQFloatingWindow window;
+
+  const CloseWindowRequested(this.window);
+
+  @override
+  List<Object?> get props => [window];
+}
+
+
+########################################
+# FILE: bloc/home_page/home_page_state.dart
+########################################
+
+part of 'home_page_bloc.dart';
+
+class HomePageState extends Equatable {
+  final bool loading;
+  final bool ready;
+  final bool hasPermission;
+  final List<HQFloatingWindow> windows;
+  final Map<String, bool> readys;
+  final String? errorMessage;
+
+  const HomePageState({
+    this.loading = true,
+    this.ready = false,
+    this.hasPermission = true,
+    this.windows = const [],
+    this.readys = const {},
+    this.errorMessage,
+  });
+
+  HomePageState copyWith({
+    bool? loading,
+    bool? ready,
+    bool? hasPermission,
+    List<HQFloatingWindow>? windows,
+    Map<String, bool>? readys,
+    String? errorMessage,
+  }) {
+    return HomePageState(
+      loading: loading ?? this.loading,
+      ready: ready ?? this.ready,
+      hasPermission: hasPermission ?? this.hasPermission,
+      windows: windows ?? this.windows,
+      readys: readys ?? this.readys,
+      errorMessage: errorMessage ?? this.errorMessage,
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        loading,
+        ready,
+        hasPermission,
+        windows,
+        readys,
+        errorMessage,
+      ];
+}
+
+
+########################################
+# FILE: examples/example1.dart
+########################################
+
+import 'dart:async';
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:hq_floating_bubble/hq_floating_bubble.dart';
+
+import '../bloc/assistive_pannel/assistive_pannel_bloc.dart';
+import '../bloc/assistive_touch/assistive_touch_bloc.dart';
+
+@pragma('vm:entry-point')
+void _pannelMain() {
+  runApp(((_) => AssistivePannel()).floating(app: true).make());
+}
+
+class AssistiveTouch extends StatefulWidget {
+  const AssistiveTouch({super.key});
+
+  @override
+  State<AssistiveTouch> createState() => _AssistiveTouchState();
+}
+
+class _AssistiveTouchState extends State<AssistiveTouch> {
+  late final AssistiveTouchBloc _bloc = AssistiveTouchBloc();
+
+  @override
+  void initState() {
+    super.initState();
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _bloc.add(
+        InitializeAssistiveTouch(
+          touchWindow: HQFloatingWindow.of(context),
+          pannelMainCallback: _pannelMain,
+        ),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _bloc.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider.value(
+      value: _bloc,
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: AssistiveButton(
+          onTap: () {
+            final w = HQFloatingWindow.of(context);
+            final pixelRatio = w?.pixelRadio ?? 3.0;
+            final x = (w?.config?.x ?? 0) / pixelRatio;
+            final y = (w?.config?.y ?? 0) / pixelRatio;
+            _bloc.add(OpenPanelRequested(x: x, y: y));
+          },
+        ),
+      ),
+    );
+  }
+}
+
+@immutable
+class AssistiveButton extends StatefulWidget {
+  /// The widget below this widget in the tree.
+  final Widget child;
+
+  /// Switches between showing the [child] or hiding it.
+  final bool visible;
+
+  /// Whether it sticks to the side.
+  final bool shouldStickToSide;
+
+  /// Empty space to surround the [child].
+  final EdgeInsets margin;
+
+  final Offset initialOffset;
+
+  /// A tap with a primary button has occurred.
+  final VoidCallback? onTap;
+
+  /// Custom animated builder.
+  final Widget Function(BuildContext context, Widget child, bool visible)? animatedBuilder;
+
+  const AssistiveButton({
+    super.key,
+    this.child = const _DefaultChild(),
+    this.visible = true,
+    this.shouldStickToSide = true,
+    this.margin = const EdgeInsets.all(8.0),
+    this.initialOffset = Offset.infinite,
+    this.onTap,
+    this.animatedBuilder,
+  });
+
+  @override
+  State<AssistiveButton> createState() => _AssistiveButtonState();
+}
+
+class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProviderStateMixin {
+  Size? _lastScreenSize;
+  EdgeInsets? _lastPadding;
+  EdgeInsets? _lastViewInsets;
+  bool _repositionScheduled = false;
+  late Offset offset = widget.initialOffset;
+  late Offset largerOffset = offset;
+
+  static const Size size = Size(56, 56);
+
+  bool isDragging = false;
+  bool isIdle = true;
+  Timer? timer;
+  Timer? _focusDebounceTimer;
+
+  late final AnimationController _scaleAnimationController = AnimationController(
+    duration: const Duration(milliseconds: 200),
+    vsync: this,
+  );
+  late final Animation<double> _scaleAnimation = CurvedAnimation(
+    parent: _scaleAnimationController,
+    curve: Curves.easeInOut,
+  );
+
+  HQFloatingWindow? window;
+  HQFloatingWindowListener? _dragStartListener;
+  HQFloatingWindowListener? _draggingListener;
+  HQFloatingWindowListener? _dragEndListener;
+
+  @override
+  void initState() {
+    super.initState();
+    // Drive the initial scale state once instead of polling every 60ms.
+    widget.visible ? _scaleAnimationController.forward() : _scaleAnimationController.reverse();
+    FocusManager.instance.addListener(listener);
+  }
+
+  @override
+  void didUpdateWidget(covariant AssistiveButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible != oldWidget.visible) {
+      widget.visible ? _scaleAnimationController.forward() : _scaleAnimationController.reverse();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final mq = MediaQuery.of(context);
+    final currentSize = mq.size;
+    final currentPadding = mq.padding;
+    final currentViewInsets = mq.viewInsets;
+
+    if (_lastScreenSize != currentSize ||
+        _lastPadding != currentPadding ||
+        _lastViewInsets != currentViewInsets) {
+      _lastScreenSize = currentSize;
+      _lastPadding = currentPadding;
+      _lastViewInsets = currentViewInsets;
+
+      if (!_repositionScheduled) {
+        _repositionScheduled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _repositionScheduled = false;
+          if (mounted) {
+            _setOffset(offset);
+          }
+        });
+      }
+    }
+    if (window == null) {
+      window = HQFloatingWindow.of(context);
+      _dragStartListener = (window, data) => _onDragStart();
+      _draggingListener = (window, data) {
+        final p = data as List<dynamic>;
+        _onDragUpdate(p[0], p[1]);
+      };
+      _dragEndListener = (window, data) => _onDragEnd();
+
+      window!.on(HQFloatingEventType.WindowDragStart, _dragStartListener!);
+      window!.on(HQFloatingEventType.WindowDragging, _draggingListener!);
+      window!.on(HQFloatingEventType.WindowDragEnd, _dragEndListener!);
+    }
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    _focusDebounceTimer?.cancel();
+    FocusManager.instance.removeListener(listener);
+    if (window != null) {
+      if (_dragStartListener != null) {
+        window!.off(HQFloatingEventType.WindowDragStart, _dragStartListener!);
+      }
+      if (_draggingListener != null) {
+        window!.off(HQFloatingEventType.WindowDragging, _draggingListener!);
+      }
+      if (_dragEndListener != null) {
+        window!.off(HQFloatingEventType.WindowDragEnd, _dragEndListener!);
+      }
+    }
+    _scaleAnimationController.dispose();
+    super.dispose();
+  }
+
+  void listener() {
+    // Cancel any pending debounce so rapid focus changes don't stack up
+    // multiple timers running concurrently.
+    _focusDebounceTimer?.cancel();
+    _focusDebounceTimer = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      largerOffset = Offset(
+        max(largerOffset.dx, offset.dx),
+        max(largerOffset.dy, offset.dy),
+      );
+
+      _setOffset(largerOffset, false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget child = widget.child;
+
+    child = GestureDetector(onTap: _onTap, child: child);
+
+    child = widget.animatedBuilder != null
+        ? widget.animatedBuilder!(context, child, widget.visible)
+        : ScaleTransition(
+            scale: _scaleAnimation,
+            child: AnimatedOpacity(
+              opacity: isIdle ? .3 : 1,
+              duration: const Duration(milliseconds: 300),
+              child: child,
+            ),
+          );
+
+    return child;
+  }
+
+  void _onTap() {
+    final callback = widget.onTap;
+    if (callback == null) return;
+
+    if (isIdle) {
+      setState(() {
+        isIdle = false;
+      });
+    }
+    _scheduleIdle();
+    callback();
+  }
+
+  void _onDragStart() {
+    if (isDragging) return;
+    setState(() {
+      isDragging = true;
+      isIdle = false;
+    });
+    timer?.cancel();
+  }
+
+  void _onDragUpdate(int x, int y) {
+    _setOffset(Offset(x.toDouble(), y.toDouble()));
+  }
+
+  void _onDragEnd() {
+    if (!isDragging) return;
+    setState(() {
+      isDragging = false;
+    });
+    _scheduleIdle();
+
+    _setOffset(offset);
+  }
+
+  void _scheduleIdle() {
+    timer?.cancel();
+    timer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || isDragging || isIdle) return;
+      setState(() {
+        isIdle = true;
+      });
+    });
+  }
+
+  Point<int>? _lastPosition;
+  void _updatePosition() {
+    final current = Point(
+      offset.dx.round(),
+      offset.dy.round(),
+    );
+
+    if (_lastPosition == current) return;
+    _lastPosition = current;
+
+    window?.update(
+      HQFloatingWindowConfig(
+        x: current.x,
+        y: current.y,
+      ),
+    );
+  }
+
+  /// Returns the [left, top, right, bottom] usable bounds for the button,
+  /// accounting for screen padding, view insets, margins, and the button's
+  /// own measured size.
+  ({double left, double top, double right, double bottom}) _bounds(Size screenSize) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenPadding = mediaQuery.padding;
+    final viewInsets = mediaQuery.viewInsets;
+    final left = screenPadding.left + viewInsets.left + widget.margin.left;
+    final top = screenPadding.top + viewInsets.top + widget.margin.top;
+    final right =
+        screenSize.width -
+        screenPadding.right -
+        viewInsets.right -
+        widget.margin.right -
+        size.width;
+    final bottom =
+        screenSize.height -
+        screenPadding.bottom -
+        viewInsets.bottom -
+        widget.margin.bottom -
+        size.height;
+    return (left: left, top: top, right: right, bottom: bottom);
+  }
+
+  /// TODO: this function should depend on the gravity to calcute the position
+  void _setOffset(Offset offset, [bool shouldUpdateLargerOffset = true]) {
+    if (offset.dx.isInfinite || offset.dy.isInfinite) {
+      final screenSize = window?.system?.screenSize ?? MediaQuery.of(context).size;
+      offset = Offset(screenSize.width, screenSize.height / 2);
+    }
+
+    if (shouldUpdateLargerOffset) {
+      largerOffset = offset;
+    }
+
+    if (isDragging) {
+      this.offset = offset;
+      return;
+    }
+
+    final screenSize = window?.system?.screenSize ?? MediaQuery.of(context).size;
+    final b = _bounds(screenSize);
+
+    final normalizedTop = max(min(offset.dy, b.bottom), b.top);
+
+    double normalizedLeft;
+    if (widget.shouldStickToSide) {
+      final centerX = b.left + ((b.right - b.left) / 2);
+      final stuckToVerticalEdge = normalizedTop == b.bottom || normalizedTop == b.top;
+      final targetX = stuckToVerticalEdge ? offset.dx : (offset.dx < centerX ? b.left : b.right);
+      normalizedLeft = max(min(targetX, b.right), b.left);
+    } else {
+      normalizedLeft = max(min(offset.dx, b.right), b.left);
+    }
+
+    this.offset = Offset(normalizedLeft, normalizedTop);
+    _updatePosition();
+  }
+}
+
+class AssistivePannel extends StatefulWidget {
+  const AssistivePannel({super.key});
+
+  @override
+  State<AssistivePannel> createState() => _AssistivePannelState();
+}
+
+class _AssistivePannelState extends State<AssistivePannel> {
+  late final AssistivePannelBloc _bloc = AssistivePannelBloc();
+  bool _windowInitialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_windowInitialized) {
+      _windowInitialized = true;
+      _bloc.add(UpdatePannelWindow(HQFloatingWindow.of(context)));
+    }
+  }
+
+  @override
+  void dispose() {
+    _bloc.close();
+    super.dispose();
+  }
+
+  final double _touchSize = 56.0;
+  var factor = 0.8;
+
+  double screenWidth = 0.0;
+  double screenHeight = 0.0;
+  double size = 0.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider.value(
+      value: _bloc,
+      child: BlocBuilder<AssistivePannelBloc, AssistivePannelState>(
+        builder: (context, state) {
+          screenWidth = MediaQuery.of(context).size.width;
+          screenHeight = MediaQuery.of(context).size.height;
+          size = screenWidth * factor;
+
+          final touchCenterX = state.touchX + _touchSize / 2;
+          final touchCenterY = state.touchY + _touchSize / 2;
+
+          final expandedLeft = (screenWidth - size) / 2;
+          final expandedTop = max(
+            20.0,
+            min(touchCenterY - size / 2, screenHeight - size - 20),
+          );
+
+          final panelCenterX = expandedLeft + size / 2;
+          final panelCenterY = expandedTop + size / 2;
+
+          final alignX = (touchCenterX - panelCenterX) / (size / 2);
+          final alignY = (touchCenterY - panelCenterY) / (size / 2);
+
+          Widget action(
+            IconData icon,
+            String title,
+            VoidCallback onTap,
+          ) {
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTap,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: .15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      icon,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _bloc.add(ClosePannelRequested()),
+            child: Container(
+              color: Colors.transparent,
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: expandedLeft,
+                    top: expandedTop,
+                    width: size,
+                    height: size,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      child: AnimatedScale(
+                        scale: state.show ? 1.0 : 0.01,
+                        alignment: Alignment(
+                          alignX.clamp(-1.0, 1.0),
+                          alignY.clamp(-1.0, 1.0),
+                        ),
+                        duration: _bloc.duration,
+                        curve: Curves.easeOutCubic,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            borderRadius: BorderRadius.all(Radius.circular(16)),
+                            color: Color.fromARGB(255, 25, 24, 24),
+                          ),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: .85),
+                              borderRadius: BorderRadius.circular(28),
+                            ),
+                            child: GridView.count(
+                              padding: const EdgeInsets.all(24),
+                              crossAxisCount: 3,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              children: [
+                                action(Icons.home, 'Home', () {}),
+                                action(Icons.screenshot, 'Screenshot', () {}),
+                                action(Icons.volume_up, 'Volume', () {}),
+                                action(Icons.brightness_6, 'Brightness', () {}),
+                                action(Icons.settings, 'Settings', () {}),
+                                action(
+                                  Icons.close,
+                                  'Close',
+                                  () => _bloc.add(ClosePannelRequested()),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DefaultChild extends StatelessWidget {
+  const _DefaultChild();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 56,
+      width: 56,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: const BorderRadius.all(Radius.circular(28)),
+      ),
+      child: Container(
+        height: 40,
+        width: 40,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.grey[400]!.withValues(alpha: .6),
+          borderRadius: const BorderRadius.all(Radius.circular(28)),
+        ),
+        child: Container(
+          height: 32,
+          width: 32,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.grey[300]!.withValues(alpha: .6),
+            borderRadius: const BorderRadius.all(Radius.circular(28)),
+          ),
+          child: Container(
+            height: 24,
+            width: 24,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.all(Radius.circular(28)),
+            ),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+########################################
+# FILE: main.dart
+########################################
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:hq_floating_bubble/hq_floating_bubble.dart';
+import 'package:hq_floating_bubble_example/bloc/home_page/home_page_bloc.dart';
+import 'package:hq_floating_bubble_example/examples/example1.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+@pragma('vm:entry-point')
+void floating() {
+  runApp(((_) => AssistiveTouch()).floating().make());
+}
+
+class MyApp extends StatefulWidget {
+  const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final _configs = [
+    HQFloatingWindowConfig(
+      id: 'assitive_touch',
+      route: '/assitive_touch',
+      autosize: false,
+      width: 200,
+      height: 200,
+      x: 300,
+      y: 300,
+      draggable: true,
+    ),
+  ];
+
+  final Map<String, WidgetBuilder> _builders = {
+    'assitive_touch': (_) => AssistiveTouch(),
+  };
+
+  final Map<String, Widget Function(BuildContext)> _routes = {};
+
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('$_configs');
+    _routes['/'] = (_) => HomePage(configs: _configs);
+
+    for (final c in _configs) {
+      if (c.route != null && _builders[c.id] != null) {
+        _routes[c.route!] = _builders[c.id]!.floating(debug: false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      scrollBehavior: const ScrollBehavior().copyWith(overscroll: false),
+      initialRoute: '/',
+      routes: _routes,
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  final List<HQFloatingWindowConfig> configs;
+  const HomePage({super.key, required this.configs});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+  late final HomePageBloc _bloc = HomePageBloc();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _bloc.add(InitializeServiceAndWindows(widget.configs));
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _bloc.close();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _bloc.add(RefreshServiceStatus());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider.value(
+      value: _bloc,
+      child: BlocBuilder<HomePageBloc, HomePageState>(
+        builder: (context, state) {
+          final showList = !state.loading && state.hasPermission && state.ready;
+
+          return Scaffold(
+            backgroundColor: const Color(0xFFF6F8FB),
+            appBar: AppBar(
+              title: const Text(
+                'HQ Floating Overlays',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              elevation: 0,
+              backgroundColor: Colors.indigo,
+            ),
+            body: state.loading
+                ? const Center(child: CircularProgressIndicator())
+                : (showList
+                      ? ListView.builder(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          itemCount: state.windows.length,
+                          itemBuilder: (context, index) => _item(
+                            state.windows[index],
+                            state.readys[state.windows[index].id] == true,
+                          ),
+                        )
+                      : Center(
+                          child: Card(
+                            elevation: 4,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    state.errorMessage != null
+                                        ? Icons.error_rounded
+                                        : Icons.security_rounded,
+                                    size: 64,
+                                    color: state.errorMessage != null ? Colors.red : Colors.orange,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    state.errorMessage != null
+                                        ? 'Error Occurred'
+                                        : 'Permission Required',
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    state.errorMessage ??
+                                        'Please grant overlay permissions to display bubbles.',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.grey),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  ElevatedButton(
+                                    onPressed: () =>
+                                        _bloc.add(InitializeServiceAndWindows(widget.configs)),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.indigo,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 32,
+                                        vertical: 12,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    child: const Text('Grant & Start'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _item(HQFloatingWindow w, bool isReady) {
+    IconData icon;
+    Color iconColor;
+
+    if (w.id == 'assitive_touch') {
+      icon = Icons.fingerprint_rounded;
+      iconColor = Colors.orange;
+    } else {
+      icon = Icons.grid_view_rounded;
+      iconColor = Colors.teal;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shadowColor: Colors.black12,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: iconColor.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: iconColor, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        w.id.toUpperCase().replaceAll('_', ' '),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isReady ? Colors.green.shade50 : Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    isReady ? 'Ready' : 'Initializing',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isReady ? Colors.green.shade700 : Colors.amber.shade700,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: isReady ? () => _bloc.add(OpenWindowRequested(w)) : null,
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: const Text('Open'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.indigo,
+                    side: const BorderSide(color: Colors.indigo),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: isReady ? () => _bloc.add(CloseWindowRequested(w)) : null,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: const Text('Close'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+=============================
+  Total Files: 11
+=============================

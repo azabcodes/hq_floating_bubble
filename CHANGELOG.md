@@ -1,3 +1,14 @@
+## 0.0.5
+
+* Implemented major performance, layout, and BLoC architecture optimizations:
+  * Refactored example app state management to follow professional BLoC architecture, separating Touch, Panel, and Home into distinct events, states, and blocs.
+  * Simplified `AssistiveButton` layout logic to use standard const `56x56` size, eliminating dynamic `RenderBox` bounds check overhead and listener leaks.
+  * Added auto-repositioning support for screen rotation and keyboard-safe view padding/insets changes.
+  * Throttled native gesture movement coordinates update updates in `ACTION_MOVE` to at most once per 16ms to drastically lower CPU consumption.
+  * Prevented redundant WindowManager layout redraw updates when bounds/dimensions are unchanged on update.
+  * Added safe animation cancels inside window destruction to prevent late anim callbacks.
+  * Added clean `offData` listener release method inside `HQFloatingWindow` and integrated it in BLoCs.
+
 ## 0.0.4
 
 * Implemented stability & memory management updates on the native Android (Kotlin) layer:

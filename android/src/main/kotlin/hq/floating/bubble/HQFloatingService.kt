@@ -152,6 +152,14 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
             FlutterEngineCache.getInstance().remove(k)
         }
         createdEngineKeys.clear()
+
+        // Clear the static instance reference now that this service instance
+        // is actually gone. Without this, isRunning()/ensureServiceAsync()
+        // would keep reporting the service as alive and hand out a dead
+        // instance to callers after the system kills/stops the service.
+        if (instance === this) {
+            instance = null
+        }
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -214,18 +222,23 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
             result.success(null)
         }
         "data.share" -> {
-            val args = call.arguments as Map<*, *>
-            val targetId = call.argument<String?>("target")
-            Log.d(TAG, "[service] share data from <plugin> with $targetId: $args")
-            if (targetId == null) {
-                Log.d(TAG, "[service] can't share data with self")
-                result.error("no allow", "share data from plugin to plugin", "")
+            val args = call.arguments as? Map<*, *>
+            if (args == null) {
+                Log.d(TAG, "[service] data.share called with invalid/missing arguments")
+                result.error("invalid_args", "Expected a map for data.share", null)
             } else {
-                val target = windows[targetId]
-                if (target != null) {
-                    target.shareData(args, result = result)
+                val targetId = call.argument<String?>("target")
+                Log.d(TAG, "[service] share data from <plugin> with $targetId: $args")
+                if (targetId == null) {
+                    Log.d(TAG, "[service] can't share data with self")
+                    result.error("no allow", "share data from plugin to plugin", "")
                 } else {
-                    result.error("not found", "target window $targetId not exits", "")
+                    val target = windows[targetId]
+                    if (target != null) {
+                        target.shareData(args, result = result)
+                    } else {
+                        result.error("not found", "target window $targetId not exits", "")
+                    }
                 }
             }
         }
@@ -357,7 +370,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         // FlutterInjector.instance().flutterLoader().ensureInitializationComplete(mContext, arrayOf())
 
         // first let's use callback to start engine first
-        if (callback!=null&&callback>0L) {
+        if (callback != null && callback != 0L) {
             Log.i(TAG, "[service] start flutter engine, id: $key callback: $callback")
 
             eng = FlutterEngine(mContext)
@@ -582,7 +595,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         }
 
         fun isRunning(context: Context): Boolean {
-            return instance != null && instance?.applicationContext != null
+            return instance != null && instance?.windows != null
         }
 
         fun start(context: Context): Boolean {

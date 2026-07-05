@@ -1,7 +1,7 @@
 import 'dart:ui';
 
 class HQFloatingSystemConfig {
-  int? pixelRadio;
+  double? pixelRadio;
   int? screenWidth;
   int? screenHeight;
 
@@ -19,34 +19,34 @@ class HQFloatingSystemConfig {
 
   Map<dynamic, dynamic> toMap() {
     return {
-      "pixelRadio": pixelRadio,
-      "screen": {
-        "height": screenHeight,
-        "width": screenWidth,
+      'pixelRadio': pixelRadio,
+      'screen': {
+        'height': screenHeight,
+        'width': screenWidth,
       },
     };
   }
 
   @override
   String toString() {
-    return "${toMap()} $screenSize";
+    return '${toMap()} $screenSize';
   }
 
   factory HQFloatingSystemConfig() {
     final view = PlatformDispatcher.instance.implicitView;
     return HQFloatingSystemConfig._(
-      pixelRadio: view?.devicePixelRatio.toInt() ?? 1,
+      pixelRadio: view?.devicePixelRatio ?? 1.0,
       screenHeight: view?.physicalSize.height.toInt() ?? 0,
       screenWidth: view?.physicalSize.width.toInt() ?? 0,
     );
   }
 
   factory HQFloatingSystemConfig.fromMap(Map<dynamic, dynamic> map) {
-    var screen = map["screen"] ?? {};
+    var screen = map['screen'] ?? {};
     return HQFloatingSystemConfig._(
-      pixelRadio: map["pixelRadio"],
-      screenHeight: screen["height"],
-      screenWidth: screen["width"],
+      pixelRadio: (map['pixelRadio'] as num?)?.toDouble(),
+      screenHeight: screen['height'],
+      screenWidth: screen['width'],
     );
   }
 }

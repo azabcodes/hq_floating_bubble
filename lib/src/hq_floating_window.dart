@@ -59,7 +59,7 @@ class HQFloatingWindow {
   }
 
   HQFloatingWindow({this.id = 'default', this.config}) {
-    _eventManager = EventManager(_message, window: this);
+    _eventManager = EventManager(_message);
     _initMethodCallHandler();
   }
 
@@ -106,16 +106,16 @@ class HQFloatingWindow {
   }
 
   Future<bool?> close({bool force = false}) async {
-    // return await HQFloatingService().closeWindow(id, force: force);
-    final v = await _channel.invokeMethod('window.close', {'id': id, 'force': force});
-    _eventManager.clear(this);
-    _onDataHandler = null;
-    // remove the window from plugin
-    HQFloatingService().windows.remove(id);
-    // release listeners/subscribers tied to this window's event stream so
-    // it doesn't linger in memory after the window is gone.
-    await eventController.close();
-    return v;
+    try {
+      return await _channel.invokeMethod('window.close', {'id': id, 'force': force});
+    } finally {
+      if (force) {
+        _eventManager.clear(this);
+        _onDataHandler = null;
+        HQFloatingService().windows.remove(id);
+        await eventController.close();
+      }
+    }
   }
 
   Future<HQFloatingWindow?> create({bool start = false}) async {
@@ -193,7 +193,12 @@ class HQFloatingWindow {
     map['data'] = data;
     map['name'] = name;
     // make sure data is serialized
-    return await _channel.invokeMethod('data.share', map);
+    try {
+      return await _channel.invokeMethod('data.share', map);
+    } on PlatformException catch (e) {
+      debugPrint('Failed to share data with target window "$id": ${e.message}');
+      return null;
+    }
   }
 
   /// launch main activity
@@ -208,6 +213,11 @@ class HQFloatingWindow {
   HQFloatingWindow onData(HQFloatingOnDataHandler handler) {
     assert(_onDataHandler == null, 'onData can only called once');
     _onDataHandler = handler;
+    return this;
+  }
+
+  HQFloatingWindow offData() {
+    _onDataHandler = null;
     return this;
   }
 

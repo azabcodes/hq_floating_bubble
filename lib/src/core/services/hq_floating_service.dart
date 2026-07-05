@@ -113,6 +113,7 @@ class HQFloatingService {
     }
 
     final completer = Completer<HQFloatingSystemConfig>();
+
     void checkMetrics(Duration _) {
       final view = PlatformDispatcher.instance.implicitView;
       final size = view?.physicalSize ?? Size.zero;
@@ -172,6 +173,10 @@ class HQFloatingService {
 
   Future<bool> startService() async {
     return await _channel.invokeMethod('plugin.start_service');
+  }
+
+  Future<bool> stopService() async {
+    return await _channel.invokeMethod('service.stop_service');
   }
 
   Future<bool> cleanCache() async {
@@ -285,7 +290,8 @@ class HQFloatingService {
     // so sync will return only one instance of window
     // improve this logic
     // means first time call sync, just create a new window
-    _window ??= HQFloatingWindow();
+    final resolvedId = map['id'] as String? ?? 'default';
+    _window ??= HQFloatingWindow(id: resolvedId);
     _window!.applyMap(map);
     _isWindow = true;
     return _window;
@@ -297,7 +303,14 @@ class HQFloatingService {
     HQFloatingEventType type,
     HQFloatingWindowListener callback,
   ) {
-    // TODO:
+    onEvent.listen((event) {
+      if (event.name == type.name) {
+        final window = _windows[event.id] ?? _window;
+        if (window != null) {
+          callback(window, event.data);
+        }
+      }
+    });
     return this;
   }
 }

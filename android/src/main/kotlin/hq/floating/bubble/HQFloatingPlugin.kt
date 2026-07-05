@@ -192,7 +192,9 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
         // the main engine should call initialize?
         // but the sub engine don't
         val pixelRadio = call.argument("pixelRadio") ?: 1.0
-        val systemConfig = call.argument<Map<*, *>?>("system") as Map<*, *>
+        // Use a safe cast: a missing/null "system" argument shouldn't crash
+        // the whole call - saveSystemConfig() already handles a null map.
+        val systemConfig = call.argument<Map<*, *>?>("system") as? Map<*, *>
 
         val map = HashMap<String, Any?>()
         map["permission_grated"] = permissionGiven(mContext)
@@ -205,7 +207,9 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
         return result.success(map)
       }
       "plugin.has_permission" -> {
-        return result.success(permissionGiven(mContext))
+        val perm = permissionGiven(mContext)
+        Log.d(TAG, "[plugin] has_permission check: $perm (context: $mContext, SDK: ${Build.VERSION.SDK_INT})")
+        return result.success(perm)
       }
       "plugin.open_permission_setting" -> {
         return result.success(requestPermissions())
@@ -252,6 +256,15 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
       MethodChannel(binding.binaryMessenger, "${HQFloatingService.METHOD_CHANNEL}/window")
         .setMethodCallHandler(null)
     } catch (_: Exception) {}
+
+    // If this was the main engine, drop its stale cache entry too, so a
+    // later re-attach (e.g. hot restart) doesn't hand out a dead engine
+    // reference via FlutterEngineCache.
+    if (isMain) {
+      FlutterEngineCache.getInstance().remove(FLUTTER_ENGINE_CACHE_KEY)
+      isMain = false
+    }
+
     myEngine = null
     myConfig = null
   }
@@ -320,7 +333,10 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
 
     fun permissionGiven(context: Context): Boolean {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        return Settings.canDrawOverlays(context)
+        val checkContext = HQFloatingService.activityRef?.get() ?: context
+        val res = Settings.canDrawOverlays(checkContext)
+        Log.d(TAG, "[plugin] Settings.canDrawOverlays checked: $res (using context: $checkContext)")
+        return res
       }
       return false
     }

@@ -1,0 +1,1695 @@
+=============================
+  Kotlin files collection
+  2026-07-06 01:33:35
+=============================
+
+########################################
+# FILE: hq/floating/bubble/HQFloatingPlugin.kt
+########################################
+
+package hq.floating.bubble
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
+import androidx.annotation.NonNull;
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry
+import org.json.JSONObject
+import java.lang.Exception
+
+/** HQFloatingPlugin */
+class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginRegistry.ActivityResultListener {
+
+  private lateinit var mContext: Context
+  private lateinit var mActivity: Activity
+  private lateinit var channel : MethodChannel
+  private lateinit var engine: FlutterEngine
+  private var waitPermissionResult: Result? = null
+
+  private var serviceChannelInstalled = false
+  private var isMain = false
+
+  private var myEngine: FlutterEngine? = null
+  private var myWindowId: String? = null
+  private var myConfig: HQFloatingWindow.Config? = null
+
+  override fun onAttachedToEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+    mContext = binding.applicationContext
+    myEngine = binding.flutterEngine
+
+    // Register method channel
+    channel = MethodChannel(binding.binaryMessenger, CHANNEL_NAME)
+    channel.setMethodCallHandler(this)
+
+    // Register the window channel on this engine
+    MethodChannel(binding.binaryMessenger, "${HQFloatingService.METHOD_CHANNEL}/window")
+      .setMethodCallHandler(this)
+
+    val startingId = HQFloatingService.startingWindowId
+    val startingConfig = HQFloatingService.startingWindowConfig
+    if (startingId != null) {
+      myWindowId = startingId
+      myConfig = startingConfig
+    }
+
+    if (FlutterEngineCache.getInstance().contains(FLUTTER_ENGINE_CACHE_KEY)) {
+      Log.d(TAG, "[plugin] on attached to window engine: $myWindowId")
+    } else {
+      isMain = true
+      engine = binding.flutterEngine
+      FlutterEngineCache.getInstance().put(FLUTTER_ENGINE_CACHE_KEY, engine)
+      Log.d(TAG, "[plugin] on attached to main engine")
+    }
+  }
+
+  private fun saveSystemConfig(data: Map<*, *>?): Boolean {
+    if (data == null) return false
+    
+    val newScreen = data["screen"] as? Map<*, *>
+    val newWidth = (newScreen?.get("width") as? Number)?.toInt() ?: 0
+    val newHeight = (newScreen?.get("height") as? Number)?.toInt() ?: 0
+    val newConfigValid = newWidth > 0 && newHeight > 0
+    
+    val old = mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE)
+      .getString(SYSTEM_CONFIG_KEY, null)
+    
+    if (old != null) {
+      try {
+        val oldJson = JSONObject(old)
+        val oldScreen = oldJson.optJSONObject("screen")
+        val oldWidth = oldScreen?.optInt("width", 0) ?: 0
+        val oldHeight = oldScreen?.optInt("height", 0) ?: 0
+        val oldConfigValid = oldWidth > 0 && oldHeight > 0
+        
+        if (oldConfigValid) {
+          Log.d(TAG, "[plugin] system config already exists with valid screen: $old")
+          return false
+        }
+        
+        if (!newConfigValid) {
+          Log.d(TAG, "[plugin] both old and new config have invalid screen size, skipping update")
+          return false
+        }
+        
+        Log.d(TAG, "[plugin] updating system config: old has 0x0 screen, new has ${newWidth}x${newHeight}")
+      } catch (e: Exception) {
+        Log.e(TAG, "[plugin] error parsing old system config: ${e.message}")
+      }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    HQFloatingService.instance?.systemConfig = data as Map<String, Any?>
+
+    return try {
+      val str = JSONObject(data).toString()
+      // json encode map to string
+      // try to save
+      mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE).edit()
+        .putString(SYSTEM_CONFIG_KEY, str)
+        .apply()
+      true
+    } catch (e: Exception) {
+      e.printStackTrace()
+      false
+    }
+  }
+
+  private fun savePixelRadio(pixelRadio: Double): Boolean {
+    val old = mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE)
+      .getFloat(PIXEL_RADIO_KEY, 0F)
+    if (old > 1F) {
+      Log.d(TAG, "[plugin] pixel radio already exits")
+      return false
+    }
+
+    HQFloatingService.instance?.pixelRadio = pixelRadio
+
+    // we need to save pixel radio
+    Log.d(TAG, "[plugin] pixel radio need to be saved")
+    mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE).edit()
+      .putFloat(PIXEL_RADIO_KEY, pixelRadio.toFloat())
+      .apply()
+    return true
+  }
+
+  private fun cleanCache(): Boolean {
+    // delete all of cache files
+    Log.w(TAG, "[plugin] will delete all of contents")
+    mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE).edit()
+      .clear().apply()
+    return true
+  }
+
+  override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
+    if (call.method == "window.sync") {
+      val currentWindow = HQFloatingService.instance?.windows?.values?.find { it.engine == myEngine }
+      if (currentWindow != null) {
+        result.success(currentWindow.toMap())
+      } else if (myWindowId != null && myConfig != null) {
+        val map = HashMap<String, Any?>()
+        map["id"] = myWindowId
+        val shared = mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE)
+        map["pixelRadio"] = shared.getFloat(PIXEL_RADIO_KEY, 0F).toDouble()
+        try {
+          val sysConfigStr = shared.getString(SYSTEM_CONFIG_KEY, null)
+          if (sysConfigStr != null) {
+            val sysJson = JSONObject(sysConfigStr)
+            val sysMap = HashMap<String, Any?>()
+            val keys = sysJson.keys()
+            while (keys.hasNext()) {
+              val key = keys.next()
+              sysMap[key] = sysJson.get(key)
+            }
+            map["system"] = sysMap
+          }
+        } catch (_: Exception) {}
+        map["config"] = myConfig?.toMap()?.filter { it.value != null }
+        result.success(map)
+      } else {
+        result.success(null)
+      }
+      return
+    }
+
+    if (call.method.startsWith("window.") || call.method.startsWith("service.") || call.method == "data.share") {
+      val currentWindow = HQFloatingService.instance?.windows?.values?.find { it.engine == myEngine }
+      if (currentWindow != null) {
+        currentWindow.onMethodCall(call, result)
+      } else if (HQFloatingService.instance != null) {
+        HQFloatingService.instance!!.onMethodCall(call, result)
+      } else {
+        result.error("SERVICE_NOT_RUNNING", "Floating service is not running", null)
+      }
+      return
+    }
+
+    when (call.method) {
+      "plugin.initialize" -> {
+        // the main engine should call initialize?
+        // but the sub engine don't
+        val pixelRadio = call.argument("pixelRadio") ?: 1.0
+        // Use a safe cast: a missing/null "system" argument shouldn't crash
+        // the whole call - saveSystemConfig() already handles a null map.
+        val systemConfig = call.argument<Map<*, *>?>("system") as? Map<*, *>
+
+        val map = HashMap<String, Any?>()
+        map["permission_grated"] = permissionGiven(mContext)
+        map["service_running"] = HQFloatingService.isRunning(mContext)
+        map["windows"] = HQFloatingService.instance?.windows?.map { it.value.toMap() }
+
+        map["pixel_radio_updated"] = savePixelRadio(pixelRadio)
+        map["system_config_updated"] = saveSystemConfig(systemConfig)
+
+        return result.success(map)
+      }
+      "plugin.has_permission" -> {
+        val perm = permissionGiven(mContext)
+        Log.d(TAG, "[plugin] has_permission check: $perm (context: $mContext, SDK: ${Build.VERSION.SDK_INT})")
+        return result.success(perm)
+      }
+      "plugin.open_permission_setting" -> {
+        return result.success(requestPermissions())
+      }
+      "plugin.grant_permission" -> {
+        return grantPermission(result)
+      }
+      // remove
+      "plugin.create_window" -> {
+        val id = call.argument<String>("id") ?: "default"
+        val cfg = call.argument<Map<String, *>>("config")!!
+        val start = call.argument<Boolean>("start") ?: false
+        val config = HQFloatingWindow.Config.from(cfg)
+        
+        // Use async version to avoid main thread blocking
+        HQFloatingService.createWindowAsync(mContext, id, config, start, null) { windowResult ->
+          result.success(windowResult)
+        }
+        return
+      }
+      "plugin.is_service_running" -> {
+        return result.success(HQFloatingService.isRunning(mContext))
+      }
+      "plugin.start_service" -> {
+        return result.success(HQFloatingService.isRunning(mContext)
+          .or(HQFloatingService.start(mContext)))
+      }
+      "plugin.clean_cache" -> {
+        return result.success(cleanCache())
+      }
+      "plugin.sync_windows" -> {
+        return result.success(HQFloatingService.instance?.windows?.map { it.value.toMap() })
+      }
+      else -> {
+        Log.d(TAG, "[plugin] method ${call.method} not implement")
+        result.notImplemented()
+      }
+    }
+  }
+
+  override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+    channel.setMethodCallHandler(null)
+    try {
+      MethodChannel(binding.binaryMessenger, "${HQFloatingService.METHOD_CHANNEL}/window")
+        .setMethodCallHandler(null)
+    } catch (_: Exception) {}
+
+    // If this was the main engine, drop its stale cache entry too, so a
+    // later re-attach (e.g. hot restart) doesn't hand out a dead engine
+    // reference via FlutterEngineCache.
+    if (isMain) {
+      FlutterEngineCache.getInstance().remove(FLUTTER_ENGINE_CACHE_KEY)
+      isMain = false
+    }
+
+    myEngine = null
+    myConfig = null
+  }
+
+  override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+    mActivity = binding.activity
+
+    // TODO: notify the window to show and return the result?
+
+    Log.d(TAG, "[plugin] on attached to activity")
+
+    // how to known are the main
+     HQFloatingService.onActivityAttached(mActivity)
+  }
+
+  override fun onDetachedFromActivityForConfigChanges() {
+    HQFloatingService.activityRef?.clear()
+    HQFloatingService.activityRef = null
+  }
+
+  override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+    mActivity = binding.activity
+    HQFloatingService.onActivityAttached(mActivity)
+  }
+
+  override fun onDetachedFromActivity() {
+    HQFloatingService.activityRef?.clear()
+    HQFloatingService.activityRef = null
+  }
+
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    if (requestCode == ALERT_WINDOW_PERMISSION) {
+      waitPermissionResult?.success(permissionGiven(mContext))
+      waitPermissionResult = null
+      return true
+    }
+    return false
+  }
+
+  private fun requestPermissions(): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      mActivity.startActivityForResult(Intent(
+        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+        Uri.parse("package:${mContext.packageName}")
+      ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), ALERT_WINDOW_PERMISSION)
+      return true
+    }
+    return false
+  }
+
+  private fun grantPermission(result: Result) {
+    waitPermissionResult = result
+    requestPermissions()
+  }
+
+  companion object {
+    private const val TAG = "HQFloatingPlugin"
+    private const val CHANNEL_NAME = "hq.floating.bubble/method"
+    private const val ALERT_WINDOW_PERMISSION = 1248
+
+    const val FLUTTER_ENGINE_CACHE_KEY = "flutter_engine_main"
+    const val SHARED_PREFERENCES_KEY = "hq_floating_bubble_cache"
+    const val CALLBACK_KEY = "callback_key"
+    const val PIXEL_RADIO_KEY = "pixel_radio"
+    const val SYSTEM_CONFIG_KEY = "system_config"
+
+    fun permissionGiven(context: Context): Boolean {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val checkContext = HQFloatingService.activityRef?.get() ?: context
+        val res = Settings.canDrawOverlays(checkContext)
+        Log.d(TAG, "[plugin] Settings.canDrawOverlays checked: $res (using context: $checkContext)")
+        return res
+      }
+      return false
+    }
+  }
+}
+
+########################################
+# FILE: hq/floating/bubble/HQFloatingService.kt
+########################################
+
+package hq.floating.bubble
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.Intent.ACTION_SHUTDOWN
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
+import android.view.WindowManager
+import androidx.core.app.NotificationCompat
+import io.flutter.FlutterInjector
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.FlutterEngineGroup
+import io.flutter.embedding.engine.dart.DartExecutor
+import io.flutter.plugin.common.BasicMessageChannel
+import io.flutter.plugin.common.JSONMessageCodec
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.view.FlutterCallbackInformation
+import org.json.JSONObject
+import java.lang.Exception
+import androidx.core.content.ContextCompat
+import java.lang.ref.WeakReference
+import java.util.concurrent.ConcurrentHashMap
+
+class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.MessageHandler<Any?>, Service() {
+
+    private lateinit var mContext: Context
+    private lateinit var windowManager: WindowManager
+
+    private lateinit var engGroup: FlutterEngineGroup
+
+    lateinit var _channel: MethodChannel
+    lateinit var _message: BasicMessageChannel<Any?>
+
+    var subscribedEvents: ConcurrentHashMap<String, Boolean> = ConcurrentHashMap()
+
+    var pixelRadio = 2.0
+    var systemConfig = emptyMap<String, Any?>()
+
+    // store the window object use the id as key
+    val windows = ConcurrentHashMap<String, HQFloatingWindow>()
+    val createdEngineKeys = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    override fun onCreate() {
+        super.onCreate()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("hq_floating_bubble", "HQFloating Service", NotificationManager.IMPORTANCE_MIN)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
+            val imageId = resources.getIdentifier("ic_launcher", "mipmap", packageName)
+            val notification = NotificationCompat.Builder(this, "hq_floating_bubble")
+                .setContentTitle("HQFloating Service")
+                .setContentText("Service is running in background")
+                .setSmallIcon(imageId)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(1, notification)
+            }
+        }
+
+        // set the instance
+        instance = this
+
+        // Trigger all pending callbacks
+        synchronized(pendingServiceCallbacks) {
+            val callbacks = ArrayList(pendingServiceCallbacks)
+            pendingServiceCallbacks.clear()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                for (cb in callbacks) {
+                    cb(true)
+                }
+            }
+        }
+
+        mContext = applicationContext
+
+        engGroup = FlutterEngineGroup(mContext)
+
+        Log.i(TAG, "[service] the background service onCreate")
+
+        // get the window manager and store
+        (getSystemService(WINDOW_SERVICE) as WindowManager).also { windowManager = it }
+
+        // load pixel from store
+        pixelRadio = mContext.getSharedPreferences(HQFloatingPlugin.SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE)
+            .getFloat(HQFloatingPlugin.PIXEL_RADIO_KEY, 2F).toDouble()
+        Log.d(TAG, "[service] load the pixel radio: $pixelRadio")
+
+        // load system config from store
+        try {
+            val str = mContext.getSharedPreferences(HQFloatingPlugin.SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE)
+                .getString(HQFloatingPlugin.SYSTEM_CONFIG_KEY, "{}")
+            val map = JSONObject(str)
+            systemConfig = map.toMap()
+        }catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // install this method channel for the main engine
+        FlutterEngineCache.getInstance().get(HQFloatingPlugin.FLUTTER_ENGINE_CACHE_KEY)
+            ?.also {
+                Log.d(TAG, "[service] install the service handler for main engine")
+                installChannel(it)
+            }
+    }
+
+    override fun onBind(p0: Intent?): IBinder? {
+        return null
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_SHUTDOWN -> {
+                (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
+                    newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+                        if (isHeld) release()
+                    }
+                }
+                Log.d(TAG, "[service] stop the background service!")
+                stopSelf()
+            }
+            else -> {
+
+            }
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+
+        // clean up: remove all views in the window manager
+        windows.values.toList().forEach {
+            it.destroy()
+            Log.d(TAG, "[service] service destroy: remove the float window ${it.key}")
+        }
+        setWakeLock(false)
+
+        // clean up all cached engines for overlay windows
+        createdEngineKeys.forEach { k ->
+            FlutterEngineCache.getInstance().remove(k)
+        }
+        createdEngineKeys.clear()
+
+        // Clear the static instance reference now that this service instance
+        // is actually gone. Without this, isRunning()/ensureServiceAsync()
+        // would keep reporting the service as alive and hand out a dead
+        // instance to callers after the system kills/stops the service.
+        if (instance === this) {
+            instance = null
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        windows.forEach {
+            it.value.onConfigurationChanged(newConfig)
+        }
+    }
+
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) = when (call.method) {
+        "service.stop_service" -> {
+            Log.d(TAG, "[service] stop the service")
+            result.success(stopService(Intent(baseContext, this.javaClass)))
+        }
+        "service.promote" -> {
+            Log.d(TAG, "[service] promote service")
+            result.success(promoteService(call.arguments as Map<*, *>?))
+        }
+        "service.demote" -> {
+            Log.d(TAG, "[service] demote service")
+            result.success(demoteService())
+        }
+        "service.set_wakelock" -> {
+            val enabled = call.argument<Boolean>("enabled") ?: false
+            setWakeLock(enabled)
+            result.success(true)
+        }
+        "service.create_window" -> {
+            val id = call.argument<String>("id") ?: "default"
+            val cfg = call.argument<Map<String, *>>("config")!!
+            val start = call.argument<Boolean>("start") ?: false
+            Log.d(TAG, "[service] window.create request_id: $id")
+            result.success(createWindow(mContext, id, HQFloatingWindow.Config.from(cfg), start, null))
+        }
+        "window.close" -> {
+            val id = call.argument<String>("id")!!
+            Log.d(TAG, "[service] window.close request_id: $id")
+            val force = call.argument("force") ?: false
+            result.success(windows[id]?.destroy(force))
+        }
+        "window.start" -> {
+            val id = call.argument<String>("id") ?: "default"
+            Log.d(TAG, "[service] window.start request_id: $id ${windows[id]}")
+            result.success(windows[id]?.start())
+        }
+        "window.show" -> {
+            val id = call.argument<String>("id")!!
+            val visible = call.argument("visible") ?: true
+            Log.d(TAG, "[service] window.show request_id: $id")
+            result.success(windows[id]?.setVisible(visible))
+        }
+        "window.update" -> {
+            val id = call.argument<String>("id")!!
+            Log.d(TAG, "[service] window.update request_id: $id")
+            val config = HQFloatingWindow.Config.from(call.argument<Map<String, *>>("config")!!)
+            result.success(windows[id]?.update(config))
+        }
+        "window.sync" -> {
+            Log.d(TAG, "[service] fake window.sync")
+            result.success(null)
+        }
+        "data.share" -> {
+            val args = call.arguments as? Map<*, *>
+            if (args == null) {
+                Log.d(TAG, "[service] data.share called with invalid/missing arguments")
+                result.error("invalid_args", "Expected a map for data.share", null)
+            } else {
+                val targetId = call.argument<String?>("target")
+                Log.d(TAG, "[service] share data from <plugin> with $targetId: $args")
+                if (targetId == null) {
+                    Log.d(TAG, "[service] can't share data with self")
+                    result.error("no allow", "share data from plugin to plugin", "")
+                } else {
+                    val target = windows[targetId]
+                    if (target != null) {
+                        target.shareData(args, result = result)
+                    } else {
+                        result.error("not found", "target window $targetId not exits", "")
+                    }
+                }
+            }
+        }
+        else -> {
+            Log.d(TAG, "[service] unknown method ${call.method}")
+            result.notImplemented()
+        }
+    }
+
+    override fun onMessage(message: Any?, reply: BasicMessageChannel.Reply<Any?>) {
+        // update the windows from message
+    }
+
+    private fun promoteService(map: Map<*, *>?): Boolean {
+        Log.i(TAG, "[service] promote service to foreground")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Log.e(TAG, "[service] promoteToForeground need sdk >= 26")
+            return false
+        }
+
+        if (map == null) {
+            Log.e(TAG, "[service] promote service config is null")
+            return false
+        }
+
+        val title = map["title"] as String? ?: "HQFloating Service"
+        val description = map["description"] as String? ?: "HQFloating service is running"
+        val showWhen = map["showWhen"] as Boolean? ?: false
+        val ticker = map["ticker"] as String?
+        val subText = map["subText"] as String?
+        val iconName = map["icon"] as String? ?: "ic_launcher"
+
+        val channel = NotificationChannel("hq_floating_bubble", "HQFloating Service", NotificationManager.IMPORTANCE_HIGH)
+        var imageId = resources.getIdentifier(iconName, "mipmap", packageName)
+        if (imageId == 0) {
+            imageId = resources.getIdentifier(iconName, "drawable", packageName)
+        }
+        if (imageId == 0) {
+            imageId = resources.getIdentifier("ic_launcher", "mipmap", packageName)
+        }
+
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
+
+        val notification = NotificationCompat.Builder(this, "hq_floating_bubble")
+            .setContentTitle(title)
+            .setContentText(description)
+            .setShowWhen(showWhen)
+            .setTicker(ticker)
+            .setSubText(subText)
+            .setSmallIcon(imageId)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(1, notification)
+        }
+        return true
+    }
+
+    private fun demoteService(): Boolean {
+        Log.i(TAG, "[service] demote service to background")
+        stopForeground(true)
+        return true
+    }
+
+    fun launchMainActivity(): Boolean {
+        if (mActivityClass == null) {
+            Log.e(TAG, "[service] the main activity is null, maybe the service start from background")
+            return false
+        }
+        Log.d(TAG, "[service] launch the main activity")
+        val intent = Intent(this, mActivityClass)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+        return true
+    }
+
+    private fun createWindow(id: String, config: HQFloatingWindow.Config, start: Boolean = false,
+        p: HQFloatingWindow?): Map<String, Any?>? {
+        startingWindowId = id
+        startingWindowConfig = config
+        try {
+            // check if id exits
+            if (windows.containsKey(id)) {
+                Log.e(TAG, "[service] window with id $id exits")
+                return null
+            }
+
+            // get flutter engine
+            val fKey = id.flutterKey()
+            val (eng, fromCache) = getFlutterEngine(fKey, config.entry, config.route, config.callback)
+
+            val svc = this
+            return HQFloatingWindow(mContext, windowManager, fKey, eng, config).apply {
+                key = id
+                service = svc
+                parent = p
+                Log.d(TAG, "[service] set window as handler $METHOD_CHANNEL/window for $eng")
+            }.init().also {
+                Log.d(TAG, "[service] created window: $id $config")
+                it.emit("created", !fromCache)
+                windows[it.key] = it
+                if (start) it.start()
+            }.toMap()
+        } finally {
+            startingWindowId = null
+            startingWindowConfig = null
+        }
+    }
+
+    // this function is useful when we want to start service automatically
+    private  fun getFlutterEngine(key: String, entryName: String?, route: String?, callback: Long?): Pair<FlutterEngine, Boolean> {
+        // first take from cache
+        var eng = FlutterEngineCache.getInstance().get(key)
+        if (eng != null) {
+            Log.i(TAG, "[service] use the flutter exits in cache, id: $key")
+            return Pair(eng, true)
+        }
+
+        Log.d(TAG, "[service] miss from cache need to create a new flutter engine")
+
+        // then create a flutter engine
+
+        // ensure initialization
+        // FlutterInjector.instance().flutterLoader().startInitialization(mContext)
+        // FlutterInjector.instance().flutterLoader().ensureInitializationComplete(mContext, arrayOf())
+
+        // first let's use callback to start engine first
+        if (callback != null && callback != 0L) {
+            Log.i(TAG, "[service] start flutter engine, id: $key callback: $callback")
+
+            eng = FlutterEngine(mContext)
+            val info = FlutterCallbackInformation.lookupCallbackInformation(callback)
+            val args = DartExecutor.DartCallback(mContext.assets, FlutterInjector.instance().flutterLoader().findAppBundlePath(), info)
+            // execute the callback function
+            eng.dartExecutor.executeDartCallback(args)
+
+            // store the engine to cache
+            FlutterEngineCache.getInstance().put(key, eng)
+            createdEngineKeys.add(key)
+
+            return Pair(eng, false)
+        }
+
+        var entry = entryName
+        if (entry==null) {
+            // try use the main entrypoint
+            entry = "main"
+            Log.w(TAG, "[service] recommend to use a entrypoint")
+        }
+
+        // check the main and default route
+        if (entry == "main" && route == null) {
+            Log.w(TAG, "[service] use the main entrypoint and default route")
+        }
+
+        Log.i(TAG, "[service] start flutter engine, id: $key entrypoint: $entry, route: $route")
+
+        // make sure the entrypoint exits
+        val entrypoint = DartExecutor.DartEntrypoint(
+            FlutterInjector.instance().flutterLoader().findAppBundlePath(), entry)
+
+        // start the dart executor with special entrypoint
+        eng = engGroup.createAndRunEngine(mContext, entrypoint, route)
+
+        // store the engine to cache
+        FlutterEngineCache.getInstance().put(key, eng)
+        createdEngineKeys.add(key)
+
+        return Pair(eng, false)
+    }
+
+    // window engine won't call this, so just window method
+    private fun installChannel(eng: FlutterEngine): Boolean {
+        Log.d(TAG, "[service] set service as handler $METHOD_CHANNEL/window for $eng")
+        // set the method and message channel
+        // this must be same as window, because we use the same method to call invoke
+        _channel = MethodChannel(eng.dartExecutor.binaryMessenger,
+            "$METHOD_CHANNEL/window").also { it.setMethodCallHandler(this) }
+        _message = BasicMessageChannel(eng.dartExecutor.binaryMessenger,
+            "$METHOD_CHANNEL/window_msg", JSONMessageCodec.INSTANCE).also { it.setMessageHandler(this) }
+        return true
+    }
+
+    private fun String.flutterKey(): String {
+        return FLUTTER_ENGINE_KEY + this
+    }
+
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private fun setWakeLock(acquire: Boolean) {
+        if (acquire) {
+            if (wakeLock == null) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+                    setReferenceCounted(false)
+                }
+            }
+            if (wakeLock?.isHeld == false) {
+                wakeLock?.acquire()
+                Log.d(TAG, "[service] WakeLock acquired")
+            }
+        } else {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+                Log.d(TAG, "[service] WakeLock released")
+            }
+        }
+    }
+
+    companion object {
+        @JvmStatic
+        private val TAG = "HQFloatingService"
+
+        // TODO: improve
+        var activityRef: WeakReference<Activity>? = null
+        var mActivityClass: Class<Activity>? = null
+
+        @SuppressLint("StaticFieldLeak")
+        var instance: HQFloatingService? = null
+
+        const val WAKELOCK_TAG = "HQFloatingService::WAKE_LOCK"
+        const val FLUTTER_ENGINE_KEY = "hq_floating_flutter_engine_"
+        const val METHOD_CHANNEL = "hq.floating.bubble"
+        const val MESSAGE_CHANNEL = "hq.floating.bubble"
+
+        fun initialize(): Boolean {
+            Log.i(TAG, "[service] initialize")
+            return true
+        }
+
+        fun createWindow(context: Context, id: String, config: HQFloatingWindow.Config,
+                         start: Boolean = false, parent: HQFloatingWindow?): Map<String, Any?>? {
+            Log.i(TAG, "[service] create a window: $id $config")
+            // make sure the service started
+            if (!ensureService(context)) return null
+
+            // If instance not ready yet, wait a bit with handler
+            if (instance == null) {
+                Log.i(TAG, "[service] instance null after ensureService, waiting...")
+                // Can't block main thread, return null and let caller retry
+                return null
+            }
+
+            // start the window
+            return instance?.createWindow(id, config, start, parent)
+        }
+        
+        fun createWindowAsync(context: Context, id: String, config: HQFloatingWindow.Config,
+                              start: Boolean = false, parent: HQFloatingWindow?,
+                              callback: (Map<String, Any?>?) -> Unit) {
+            Log.i(TAG, "[service] create a window async: $id")
+            
+            fun doCreate() {
+                val result = instance?.createWindow(id, config, start, parent)
+                callback(result)
+            }
+            
+            if (instance != null) {
+                doCreate()
+                return
+            }
+            
+            ensureServiceAsync(context) { success ->
+                if (success && instance != null) {
+                    doCreate()
+                } else {
+                    Log.e(TAG, "[service] failed to ensure service for window creation")
+                    callback(null)
+                }
+            }
+        }
+
+        // ensure the service is started
+        private fun ensureService(context: Context): Boolean {
+            if (instance != null) return true
+
+            // let's start the service
+
+            // make sure we granted permission
+            if (!HQFloatingPlugin.permissionGiven(context)) {
+                Log.e(TAG, "[service] don't have permission to create overlay window")
+                return false
+            }
+
+            // start the service
+            val intent = Intent(context, HQFloatingService::class.java)
+            ContextCompat.startForegroundService(context, intent)
+            
+            // Service.onCreate() runs on main thread, so we can't block here
+            // Return true optimistically - the service will be ready when needed
+            // Since we're on main thread, service onCreate will run after this returns
+            Log.i(TAG, "[service] service start requested, returning optimistically")
+            return true
+        }
+        
+        // Async version for callbacks
+        val pendingServiceCallbacks = java.util.Collections.synchronizedList(ArrayList<(Boolean) -> Unit>())
+
+        fun ensureServiceAsync(context: Context, callback: (Boolean) -> Unit) {
+            if (instance != null) {
+                callback(true)
+                return
+            }
+            
+            if (!HQFloatingPlugin.permissionGiven(context)) {
+                Log.e(TAG, "[service] don't have permission to create overlay window")
+                callback(false)
+                return
+            }
+            
+            pendingServiceCallbacks.add(callback)
+            
+            val intent = Intent(context, HQFloatingService::class.java)
+            ContextCompat.startForegroundService(context, intent)
+            
+            // Timeout after 4 seconds as a fallback check
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val fired = synchronized(pendingServiceCallbacks) {
+                    if (pendingServiceCallbacks.contains(callback)) {
+                        pendingServiceCallbacks.remove(callback)
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (fired) {
+                    callback(instance != null)
+                }
+            }, 4000)
+        }
+
+        @JvmStatic
+        var startingWindowId: String? = null
+        @JvmStatic
+        var startingWindowConfig: HQFloatingWindow.Config? = null
+
+        fun onActivityAttached(activity: Activity) {
+            Log.i(TAG, "[service] activity attached")
+            if (activityRef?.get() != null) {
+                Log.w(TAG, "[service] main activity already set")
+                return
+            }
+            activityRef = WeakReference(activity)
+            mActivityClass = activity.javaClass as Class<Activity>
+        }
+
+        fun installChannel(eng: FlutterEngine): Boolean {
+            Log.i(TAG, "[service] install the service channel for engine")
+            return instance?.installChannel(eng) ?: false
+        }
+
+        fun isRunning(context: Context): Boolean {
+            return instance != null && instance?.windows != null
+        }
+
+        fun start(context: Context): Boolean {
+            return ensureService(context)
+        }
+    }
+}
+
+########################################
+# FILE: hq/floating/bubble/HQFloatingUtils.kt
+########################################
+
+package hq.floating.bubble
+
+import android.app.ActivityManager
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.math.BigInteger
+import java.security.MessageDigest
+
+fun JSONObject.toMap(): Map<String, *> = keys().asSequence().associateWith {
+    when (val value = this[it])
+    {
+        is JSONArray ->
+        {
+            val map = (0 until value.length()).associate { Pair(it.toString(), value[it]) }
+            JSONObject(map).toMap().values.toList()
+        }
+        is JSONObject -> value.toMap()
+        JSONObject.NULL -> null
+        else            -> value
+    }
+}
+
+class HQFloatingUtils {
+    companion object {
+        fun getRunningService(context: Context, serviceClass: Class<*>): ActivityManager.RunningServiceInfo? {
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager?
+            for (service in manager!!.getRunningServices(Int.MAX_VALUE)) {
+                if (serviceClass.name == service.service.className) {
+                    return service
+                }
+            }
+
+            return null
+        }
+
+        fun md5(input:String): String {
+            val md = MessageDigest.getInstance("MD5")
+            return BigInteger(1, md.digest(input.toByteArray())).toString(16).padStart(32, '0')
+        }
+
+        fun genKey(vararg items: Any?): String {
+            return HQFloatingUtils.md5(items.joinToString(separator="-"){ "$it" }).slice(IntRange(0, 12))
+        }
+    }
+}
+
+########################################
+# FILE: hq/floating/bubble/HQFloatingWindow.kt
+########################################
+
+package hq.floating.bubble
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.os.Build
+import android.util.Log
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.view.WindowManager.LayoutParams
+import android.view.WindowManager.LayoutParams.*
+import io.flutter.embedding.android.FlutterTextureView
+import io.flutter.embedding.android.FlutterView
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.plugin.common.BasicMessageChannel
+import io.flutter.plugin.common.JSONMessageCodec
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+
+@SuppressLint("ClickableViewAccessibility")
+class HQFloatingWindow(
+    context: Context,
+    wmr: WindowManager,
+    engKey: String,
+    eng: FlutterEngine,
+    cfg: Config): View.OnTouchListener, MethodChannel.MethodCallHandler,
+    BasicMessageChannel.MessageHandler<Any?> {
+
+    var parent: HQFloatingWindow? = null
+
+    var config = cfg
+
+    var key: String = "default"
+
+    var engineKey = engKey
+    var engine = eng
+
+    var wm = wmr
+
+    var subscribedEvents: MutableMap<String, Boolean> = mutableMapOf()
+
+    var view: FlutterView = FlutterView(context, FlutterTextureView(context))
+
+    lateinit var layoutParams: LayoutParams
+
+    lateinit var service: HQFloatingService
+
+    // method and message channel for window engine call
+    var _channel: MethodChannel = MethodChannel(eng.dartExecutor.binaryMessenger,
+        "${HQFloatingService.METHOD_CHANNEL}/window").also {
+        it.setMethodCallHandler(this) }
+    var _message: BasicMessageChannel<Any?> = BasicMessageChannel(eng.dartExecutor.binaryMessenger,
+        "${HQFloatingService.MESSAGE_CHANNEL}/window_msg", JSONMessageCodec.INSTANCE)
+        .also { it.setMessageHandler(this) }
+
+    var _started = false
+
+    fun init(): HQFloatingWindow {
+        layoutParams = config.to()
+
+        config.focusable?.let{
+            view.isFocusable = it
+            view.isFocusableInTouchMode = it
+        }
+
+        view.setBackgroundColor(Color.TRANSPARENT)
+        view.fitsSystemWindows = true
+
+        config.visible?.let{ setVisible(it) }
+
+        view.setOnTouchListener(this)
+
+        // view.attachToFlutterEngine(engine)
+        return this
+    }
+
+    fun destroy(force: Boolean = true): Boolean {
+        Log.i(TAG, "[window] destroy window: $key force: $force")
+
+        view.animate().cancel()
+
+        // remote from manager must be first
+        try {
+            if (_started) wm.removeView(view)
+        } catch (_: Exception) {}
+
+        view.detachFromFlutterEngine()
+
+
+        // TODO: should we stop the engine for flutter?
+        if (force) {
+            // stop engine and remove from cache
+            FlutterEngineCache.getInstance().remove(engineKey)
+            service.createdEngineKeys.remove(engineKey)
+            engine.destroy()
+            service.windows.remove(key)
+            emit("destroy", null)
+        } else {
+            _started = false
+            engine.lifecycleChannel.appIsPaused()
+            emit("paused", null)
+        }
+        return true
+    }
+
+    fun setVisible(visible: Boolean = true): Boolean {
+        Log.d(TAG, "[window] set window $key => $visible")
+        emit("visible", visible)
+        view.animate().cancel()
+        if (visible) {
+            view.visibility = View.VISIBLE
+            view.alpha = 0f
+            view.scaleX = 0.5f
+            view.scaleY = 0.5f
+            view.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(250)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        } else {
+            view.animate()
+                .alpha(0f)
+                .scaleX(0.5f)
+                .scaleY(0.5f)
+                .setDuration(250)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .withEndAction {
+                    view.visibility = View.GONE
+                }
+                .start()
+        }
+        return visible
+    }
+
+    fun update(cfg: Config): Map<String, Any?> {
+        Log.d(TAG, "[window] update window $key => $cfg")
+        val oldX = layoutParams.x
+        val oldY = layoutParams.y
+        val oldWidth = layoutParams.width
+        val oldHeight = layoutParams.height
+        val oldGravity = layoutParams.gravity
+
+        config = config.update(cfg).also {
+            val newParams = it.to()
+            if (newParams.x != oldX || newParams.y != oldY || 
+                newParams.width != oldWidth || newParams.height != oldHeight || 
+                newParams.gravity != oldGravity) {
+                layoutParams = newParams
+                if (_started) wm.updateViewLayout(view, layoutParams)
+            }
+        }
+        return toMap()
+    }
+
+    fun start(): Boolean {
+        if (_started) {
+            Log.d(TAG, "[window] window $key already started")
+            return true
+        }
+
+        _started = true
+        Log.d(TAG, "[window] start window: $key")
+
+        engine.lifecycleChannel.appIsResumed()
+
+        // if engine is paused, send re-render message
+        // make sure reuse engine can be re-render
+        emit("resumed")
+
+        view.attachToFlutterEngine(engine)
+
+        wm.addView(view, layoutParams)
+
+        emit("started")
+
+        return true
+    }
+
+    fun shareData(data: Map<*, *>, source: String? = null, result: MethodChannel.Result? = null) {
+        shareData(_channel, data, source, result)
+    }
+
+    fun simpleEmit(msgChannel: BasicMessageChannel<Any?>, name: String, data: Any?=null) {
+        val map = HashMap<String, Any?>()
+        map["name"] = name
+        map["id"] = key // this is special for main engine
+        map["data"] = data
+        msgChannel.send(map)
+    }
+
+    fun emit(name: String, data: Any? = null, prefix: String?="window", pluginNeed: Boolean = true) {
+        val evtName = "$prefix.$name"
+        // Log.i(TAG, "[window] emit event: HQFloatingWindow[$key] $name ")
+
+        // check if need to send to my self
+        if (subscribedEvents.containsKey(name) || subscribedEvents.containsKey("*")) {
+            // emit to window engine
+            simpleEmit(_message, evtName, data)
+        }
+
+        // plugin
+        // check if we need to fire to plugin
+        if (pluginNeed && (service.subscribedEvents.containsKey("*") || service.subscribedEvents.containsKey(evtName))) {
+            simpleEmit(service._message, evtName, data)
+        }
+
+        // emit parent engine
+        // if fire to parent need have no need to fire to service again
+        if(parent!=null&&parent!=this) {
+            parent!!.simpleEmit(parent!!._message, evtName, data)
+        }
+
+        // _channel.invokeMethod("window.$name", data)
+        // we need to send to man engine
+        // service._channel.invokeMethod("window.$name", key)
+    }
+
+    fun toMap(): Map<String, Any?> {
+        // must not null if success created
+        val map = HashMap<String, Any?>()
+        map["id"] = key
+        map["pixelRadio"] = service.pixelRadio
+        map["system"] = service.systemConfig
+        map["config"] = config.toMap().filter { it.value != null }
+        return map
+    }
+
+    override fun toString(): String {
+        return "${toMap()}"
+    }
+
+    // return window from svc.windows by id
+    fun take(id: String): HQFloatingWindow? {
+        return service.windows[id]
+    }
+
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        return when (call.method) {
+            // just take current engine's window
+            "window.sync" -> {
+                // when flutter is ready should call this to sync the window object.
+                Log.i(TAG, "[window] window.sync from flutter side: $key")
+                result.success(toMap())
+            }
+
+            // we need to support call window.* in window engine
+            // but the window engine register as window channel
+            // so we should take the id first and then get window from windows cache
+            // TODO: those code should move to service
+
+            "window.create_child" -> {
+                val id = call.argument<String>("id") ?: "default"
+                val cfg = call.argument<Map<String, *>>("config")!!
+                val start = call.argument<Boolean>("start") ?: false
+                val config = HQFloatingWindow.Config.from(cfg)
+                Log.d(TAG, "[service] window.create_child request_id: $id")
+                return result.success(HQFloatingService.createWindow(service.applicationContext, id,
+                        config, start, this))
+            }
+            "window.close" -> {
+                val id = call.argument<String?>("id")?:"<unset>"
+                Log.d(TAG, "[window] window.close request_id: $id, my_id: $key")
+                val force = call.argument("force") ?: false
+                return result.success(take(id)?.destroy(force))
+            }
+            "window.destroy" -> {
+                val id = call.argument<String?>("id")?:"<unset>"
+                Log.d(TAG, "[window] window.destroy request_id: $id, my_id: $key")
+                return result.success(take(id)?.destroy(true))
+            }
+            "window.start" -> {
+                val id = call.argument<String?>("id")?:"<unset>"
+                Log.d(TAG, "[window] window.start request_id: $id, my_id: $key")
+                return result.success(take(id)?.start())
+            }
+            "window.update" -> {
+                val id = call.argument<String?>("id")?:"<unset>"
+                Log.d(TAG, "[window] window.update request_id: $id, my_id: $key")
+                val config = Config.from(call.argument<Map<String, *>>("config")!!)
+                return result.success(take(id)?.update(config))
+            }
+            "window.show" -> {
+                val id = call.argument<String?>("id")?:"<unset>"
+                Log.d(TAG, "[window] window.show request_id: $id, my_id: $key")
+                val visible = call.argument<Boolean>("visible") ?: true
+                return result.success(take(id)?.setVisible(visible))
+            }
+            "window.launch_main" -> {
+                Log.d(TAG, "[window] window.launch_main")
+                return result.success(service.launchMainActivity())
+            }
+            "window.lifecycle" -> {
+
+            }
+            "event.subscribe" -> {
+                val id = call.argument<String?>("id")?:"<unset>"
+
+            }
+            "data.share" -> {
+                // communicate with other window, only 1 - 1 with id
+                val args = call.arguments as? Map<*, *>
+                if (args == null) {
+                    Log.d(TAG, "[window] data.share called with invalid/missing arguments")
+                    return result.error("invalid_args", "Expected a map for data.share", null)
+                }
+                val targetId = call.argument<String?>("target")
+                Log.d(TAG, "[window] share data from $key with $targetId: $args")
+                if (targetId == null) {
+                    Log.d(TAG, "[window] share data with plugin")
+                    return result.success(shareData(service._channel, args, source=key, result=result))
+                }
+                if (targetId == key) {
+                    Log.d(TAG, "[window] can't share data with self")
+                    return result.error("no allow", "share data from $key to $targetId", "")
+                }
+                val target = service.windows[targetId]
+                    ?: return result.error("not found", "target window $targetId not exits", "");
+                return target.shareData(args, source=key, result=result)
+            }
+            else -> {
+                result.notImplemented()
+            }
+        }
+    }
+
+    override fun onMessage(msg: Any?, reply: BasicMessageChannel.Reply<Any?>) {
+        // stream message
+    }
+
+    companion object {
+        private const val TAG = "HQFloatingWindow"
+
+        fun shareData(channel: MethodChannel, data: Map<*, *>, source: String? = null,
+                      result: MethodChannel.Result? = null): Any? {
+            // id is the data comes from
+            // invoke the method channel
+            val map = HashMap<String, Any?>()
+            map["source"] = source
+            data.forEach { map[it.key as String] = it.value }
+            channel.invokeMethod("data.share", map, result)
+            // how to get data back
+            return null
+        }
+    }
+
+    // window is dragging
+    private var dragging = false
+    private var lastDragEmitTime = 0L
+
+    // start point
+    private var lastX = 0f
+    private var lastY = 0f
+
+    // border around
+    // TODO: support generate around edge
+
+    private fun getInterpolator(curveName: String?): android.view.animation.Interpolator {
+        return when (curveName?.lowercase()) {
+            "accelerate" -> android.view.animation.AccelerateInterpolator()
+            "bounce" -> android.view.animation.BounceInterpolator()
+            "overshoot" -> android.view.animation.OvershootInterpolator()
+            "linear" -> android.view.animation.LinearInterpolator()
+            else -> android.view.animation.DecelerateInterpolator()
+        }
+    }
+
+    fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        if (!_started) return
+        val displayMetrics = service.resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        val wWidth = if (view != null && view.width > 0) view.width else (config.width ?: 0)
+        val wHeight = if (view != null && view.height > 0) view.height else (config.height ?: 0)
+
+        // Constrain current positions to new screen boundaries
+        val constrainedX = Math.max(0, Math.min(layoutParams.x, screenWidth - wWidth))
+        val constrainedY = Math.max(0, Math.min(layoutParams.y, screenHeight - wHeight))
+
+        if (config.magnet != false) {
+            val targetX = if (constrainedX + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)
+            val animator = android.animation.ValueAnimator.ofInt(layoutParams.x, targetX)
+            animator.duration = (config.snapDuration ?: 250).toLong()
+            animator.interpolator = getInterpolator(config.snapCurve)
+            animator.addUpdateListener { valueAnimator ->
+                val animX = valueAnimator.animatedValue as Int
+                update(Config().apply {
+                    x = animX
+                    y = constrainedY
+                })
+            }
+            animator.start()
+        } else {
+            update(Config().apply {
+                x = constrainedX
+                y = constrainedY
+            })
+        }
+    }
+
+    override fun onTouch(view: View?, event: MotionEvent?): Boolean {
+        // default draggable should be false
+        if (config.draggable != true) return false
+        val displayMetrics = service.resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        val wWidth = if (view != null && view.width > 0) view.width else (config.width ?: 0)
+        val wHeight = if (view != null && view.height > 0) view.height else (config.height ?: 0)
+
+        when (event?.action) {
+            MotionEvent.ACTION_DOWN -> {
+                // touch start
+                dragging = false
+                lastX = event.rawX
+                lastY = event.rawY
+            }
+            MotionEvent.ACTION_MOVE -> {
+                // touch move
+                val dx = event.rawX - lastX
+                val dy = event.rawY - lastY
+
+                // ignore too small first start moving(some time is click)
+                if (!dragging && dx*dx+dy*dy < 25) {
+                    return false
+                }
+
+                // update the last point
+                lastX = event.rawX
+                lastY = event.rawY
+
+                val xx = layoutParams.x + dx.toInt()
+                val yy = layoutParams.y + dy.toInt()
+
+                // Constrain values within screen boundaries
+                val constrainedX = Math.max(0, Math.min(xx, screenWidth - wWidth))
+                val constrainedY = Math.max(0, Math.min(yy, screenHeight - wHeight))
+
+                if (!dragging) {
+                    // first time dragging
+                    emit("drag_start", listOf(constrainedX, constrainedY))
+                }
+
+                dragging = true
+                
+                // Keep local layoutParams updated
+                layoutParams.x = constrainedX
+                layoutParams.y = constrainedY
+
+                // Throttle visual layout update and dragging event (max once every 16ms)
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastDragEmitTime >= 16) {
+                    if (_started) {
+                        wm.updateViewLayout(view, layoutParams)
+                    }
+                    emit("dragging", listOf(constrainedX, constrainedY))
+                    lastDragEmitTime = currentTime
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // touch end
+                if (dragging) {
+                    // Ensure final position is applied and emitted before snapping
+                    if (_started) {
+                        wm.updateViewLayout(view, layoutParams)
+                    }
+                    emit("dragging", listOf(layoutParams.x, layoutParams.y))
+                    
+                    if (config.magnet != false) {
+                        // magnet effect snapping to horizontal edge
+                        val targetX = if (layoutParams.x + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)
+                        val animator = android.animation.ValueAnimator.ofInt(layoutParams.x, targetX)
+                        animator.duration = (config.snapDuration ?: 250).toLong()
+                        animator.interpolator = getInterpolator(config.snapCurve)
+                        animator.addUpdateListener { valueAnimator ->
+                            val animX = valueAnimator.animatedValue as Int
+                            update(Config().apply { x = animX })
+                        }
+                        animator.addListener(object : android.animation.AnimatorListenerAdapter() {
+                            override fun onAnimationEnd(animation: android.animation.Animator) {
+                                emit("drag_end", listOf(targetX.toDouble(), layoutParams.y.toDouble()))
+                            }
+                        })
+                        animator.start()
+                    } else {
+                        emit("drag_end", listOf(layoutParams.x.toDouble(), layoutParams.y.toDouble()))
+                    }
+                }
+                return dragging
+            }
+            else -> {
+                return false
+            }
+        }
+        return false
+    }
+
+    class Config {
+        // this three fields can not be changed
+        // var id: String = "default"
+        var entry: String? = null
+        var route: String? = null
+        var callback: Long? = null
+
+        var autosize: Boolean? = null
+
+        var width: Int? = null
+        var height: Int? = null
+        var x: Int? = null
+        var y: Int? = null
+
+        var format: Int? = null
+        var gravity: Int? = null
+        var type: Int? = null
+
+        var clickable: Boolean? = null
+        var draggable: Boolean? = null
+        var focusable: Boolean? = null
+
+        var immersion: Boolean? = null
+
+        var visible: Boolean? = null
+        var magnet: Boolean? = null
+        var snapDuration: Int? = null
+        var snapCurve: String? = null
+
+
+        // inline fun <reified T: Any?>to(): T {
+        fun to(): LayoutParams {
+            val cfg = this
+            return LayoutParams().apply {
+                // set size
+                width = cfg.width ?: 1 // we must have 1 pixel, let flutter can generate the pixel radio
+                height = cfg.height ?: 1 // we must have 1 pixel, let flutter can generate the pixel radio
+
+                // set position fixed if with (x, y)
+                cfg.x?.let { x = it } // default not set
+                cfg.y?.let { y = it } // default not set
+
+                // format
+                format = cfg.format ?: PixelFormat.TRANSPARENT
+
+                // default start from center
+                gravity = cfg.gravity ?: Gravity.TOP or Gravity.LEFT
+
+                // default flags
+                flags = FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCH_MODAL
+                // if immersion add flag no limit
+                cfg.immersion?.let{ if (it) flags = flags or FLAG_LAYOUT_NO_LIMITS }
+                // default we should be clickable
+                // if not clickable, add flag not touchable
+                cfg.clickable?.let{ if (!it) flags = flags or FLAG_NOT_TOUCHABLE }
+                // default we should be no focusable
+                if (cfg.focusable == null) { cfg.focusable = false }
+                // if not focusable, add no focusable flag
+                cfg.focusable?.let { if (!it) flags = flags or FLAG_NOT_FOCUSABLE }
+
+                // default type is overlay
+                type = cfg.type ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) TYPE_APPLICATION_OVERLAY else TYPE_PHONE
+            }
+        }
+
+        fun toMap(): Map<String, Any?> {
+            val map = HashMap<String, Any?>()
+            map["entry"] = entry
+            map["route"] = route
+            map["callback"] = callback
+
+            map["autosize"] = autosize
+
+            map["width"] = width
+            map["height"] = height
+            map["x"] = x
+            map["y"] = y
+
+            map["format"] = format
+            map["gravity"] = gravity
+            map["type"] = type
+
+            map["clickable"] = clickable
+            map["draggable"] = draggable
+            map["focusable"] = focusable
+
+            map["immersion"] = immersion
+
+            map["visible"] = visible
+            map["magnet"] = magnet
+            map["snapDuration"] = snapDuration
+            map["snapCurve"] = snapCurve
+
+            return map;
+        }
+
+        fun update(cfg: Config): Config {
+            // entry, route, callback shouldn't be updated
+
+            cfg.autosize?.let { autosize = it }
+
+            cfg.width?.let { width = it }
+            cfg.height?.let { height = it }
+            cfg.x?.let { x = it }
+            cfg.y?.let { y = it }
+
+            cfg.format?.let { format = it }
+            cfg.gravity?.let { gravity = it }
+            cfg.type?.let { type = it }
+
+            cfg.clickable?.let{ clickable = it }
+            cfg.draggable?.let { draggable = it }
+            cfg.focusable?.let { focusable = it }
+
+            cfg.immersion?.let { immersion = it }
+
+            cfg.visible?.let { visible = it }
+            cfg.magnet?.let { magnet = it }
+            cfg.snapDuration?.let { snapDuration = it }
+            cfg.snapCurve?.let { snapCurve = it }
+
+            return this
+        }
+
+        override fun toString(): String {
+            val map = toMap()?.filter { it.value != null }
+            return "$map"
+        }
+
+        companion object {
+
+            fun from(data: Map<String, *>): Config {
+                val cfg = Config()
+
+                // (data["id"]?.let { it as String } ?: "default").also { cfg.id = it }
+                cfg.entry = data["entry"] as String?
+                cfg.route = data["route"] as String?
+
+                val int_callback = data["callback"] as Number?
+                cfg.callback = int_callback?.toLong()
+
+                cfg.autosize = data["autosize"] as Boolean?
+
+                cfg.width = (data["width"] as? Number)?.toInt()
+                cfg.height = (data["height"] as? Number)?.toInt()
+                cfg.x = (data["x"] as? Number)?.toInt()
+                cfg.y = (data["y"] as? Number)?.toInt()
+
+                cfg.gravity = (data["gravity"] as? Number)?.toInt()
+                cfg.format = (data["format"] as? Number)?.toInt()
+                cfg.type = (data["type"] as? Number)?.toInt()
+
+                cfg.clickable = data["clickable"] as Boolean?
+                cfg.draggable = data["draggable"] as Boolean?
+                cfg.focusable = data["focusable"] as Boolean?
+
+                cfg.immersion = data["immersion"] as Boolean?
+
+                cfg.visible = data["visible"] as Boolean?
+                cfg.magnet = data["magnet"] as Boolean?
+                cfg.snapDuration = (data["snapDuration"] as? Number)?.toInt()
+                cfg.snapCurve = data["snapCurve"] as String?
+
+                return cfg
+            }
+        }
+    }
+
+}
+
+=============================
+  Total Files: 4
+=============================
