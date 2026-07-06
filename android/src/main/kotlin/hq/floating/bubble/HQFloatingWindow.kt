@@ -186,10 +186,10 @@ class HQFloatingWindow(
         shareData(_channel, data, source, result)
     }
 
-    fun simpleEmit(msgChannel: BasicMessageChannel<Any?>, name: String, data: Any?=null) {
+    fun simpleEmit(msgChannel: BasicMessageChannel<Any?>, name: String, data: Any?=null, senderId: String? = null) {
         val map = HashMap<String, Any?>()
         map["name"] = name
-        map["id"] = key // this is special for main engine
+        map["id"] = senderId ?: key // this is special for main engine
         map["data"] = data
         msgChannel.send(map)
     }
@@ -198,27 +198,19 @@ class HQFloatingWindow(
         val evtName = "$prefix.$name"
         // Log.i(TAG, "[window] emit event: HQFloatingWindow[$key] $name ")
 
-        // check if need to send to my self
-        if (subscribedEvents.containsKey(name) || subscribedEvents.containsKey("*")) {
-            // emit to window engine
-            simpleEmit(_message, evtName, data)
-        }
+        // Always emit to my own window engine/isolate
+        simpleEmit(_message, evtName, data, key)
 
-        // plugin
-        // check if we need to fire to plugin
-        if (pluginNeed && (service.subscribedEvents.containsKey("*") || service.subscribedEvents.containsKey(evtName))) {
-            simpleEmit(service._message, evtName, data)
+        // Always emit to the plugin/service (main engine)
+        if (pluginNeed) {
+            simpleEmit(service._message, evtName, data, key)
         }
 
         // emit parent engine
         // if fire to parent need have no need to fire to service again
         if(parent!=null&&parent!=this) {
-            parent!!.simpleEmit(parent!!._message, evtName, data)
+            parent!!.simpleEmit(parent!!._message, evtName, data, key)
         }
-
-        // _channel.invokeMethod("window.$name", data)
-        // we need to send to man engine
-        // service._channel.invokeMethod("window.$name", key)
     }
 
     fun toMap(): Map<String, Any?> {
@@ -256,12 +248,15 @@ class HQFloatingWindow(
 
             "window.create_child" -> {
                 val id = call.argument<String>("id") ?: "default"
-                val cfg = call.argument<Map<String, *>>("config")!!
+                val cfg = call.argument<Map<String, *>>("config")
+                    ?: return result.error("invalid_args", "Missing config argument", null)
                 val start = call.argument<Boolean>("start") ?: false
                 val config = HQFloatingWindow.Config.from(cfg)
                 Log.d(TAG, "[service] window.create_child request_id: $id")
-                return result.success(HQFloatingService.createWindow(service.applicationContext, id,
-                        config, start, this))
+                HQFloatingService.createWindowAsync(service.applicationContext, id, config, start, this) { windowResult ->
+                    result.success(windowResult)
+                }
+                return
             }
             "window.close" -> {
                 val id = call.argument<String?>("id")?:"<unset>"
@@ -282,7 +277,9 @@ class HQFloatingWindow(
             "window.update" -> {
                 val id = call.argument<String?>("id")?:"<unset>"
                 Log.d(TAG, "[window] window.update request_id: $id, my_id: $key")
-                val config = Config.from(call.argument<Map<String, *>>("config")!!)
+                val cfg = call.argument<Map<String, *>>("config")
+                    ?: return result.error("invalid_args", "Missing config argument", null)
+                val config = Config.from(cfg)
                 return result.success(take(id)?.update(config))
             }
             "window.show" -> {
@@ -352,6 +349,14 @@ class HQFloatingWindow(
     // window is dragging
     private var dragging = false
     private var lastDragEmitTime = 0L
+    private val dragHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val dragRunnable = Runnable {
+        if (_started) {
+            wm.updateViewLayout(view, layoutParams)
+        }
+        emit("dragging", listOf(layoutParams.x, layoutParams.y))
+        lastDragEmitTime = System.currentTimeMillis()
+    }
 
     // start point
     private var lastX = 0f
@@ -370,6 +375,31 @@ class HQFloatingWindow(
         }
     }
 
+    private fun performMagnetSnap(currentX: Int, currentY: Int?, screenWidth: Int, wWidth: Int, onEnd: ((Int) -> Unit)? = null) {
+        val targetX = if (currentX + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)
+        Log.d(TAG, "[window] performMagnetSnap window $key currentX=$currentX targetX=$targetX currentY=$currentY")
+        val animator = android.animation.ValueAnimator.ofInt(layoutParams.x, targetX)
+        animator.duration = (config.snapDuration ?: 250).toLong()
+        animator.interpolator = getInterpolator(config.snapCurve)
+        animator.addUpdateListener { valueAnimator ->
+            val animX = valueAnimator.animatedValue as Int
+            update(Config().apply {
+                x = animX
+                if (currentY != null) {
+                    y = currentY
+                }
+            })
+        }
+        if (onEnd != null) {
+            animator.addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    onEnd(targetX)
+                }
+            })
+        }
+        animator.start()
+    }
+
     fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         if (!_started) return
         val displayMetrics = service.resources.displayMetrics
@@ -384,18 +414,7 @@ class HQFloatingWindow(
         val constrainedY = Math.max(0, Math.min(layoutParams.y, screenHeight - wHeight))
 
         if (config.magnet != false) {
-            val targetX = if (constrainedX + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)
-            val animator = android.animation.ValueAnimator.ofInt(layoutParams.x, targetX)
-            animator.duration = (config.snapDuration ?: 250).toLong()
-            animator.interpolator = getInterpolator(config.snapCurve)
-            animator.addUpdateListener { valueAnimator ->
-                val animX = valueAnimator.animatedValue as Int
-                update(Config().apply {
-                    x = animX
-                    y = constrainedY
-                })
-            }
-            animator.start()
+            performMagnetSnap(constrainedX, constrainedY, screenWidth, wWidth)
         } else {
             update(Config().apply {
                 x = constrainedX
@@ -414,6 +433,9 @@ class HQFloatingWindow(
         val wWidth = if (view != null && view.width > 0) view.width else (config.width ?: 0)
         val wHeight = if (view != null && view.height > 0) view.height else (config.height ?: 0)
 
+        val touchSlop = android.view.ViewConfiguration.get(service).scaledTouchSlop
+        val touchSlopSquare = touchSlop * touchSlop
+
         when (event?.action) {
             MotionEvent.ACTION_DOWN -> {
                 // touch start
@@ -425,9 +447,10 @@ class HQFloatingWindow(
                 // touch move
                 val dx = event.rawX - lastX
                 val dy = event.rawY - lastY
+                Log.v(TAG, "[window] onTouch ACTION_MOVE window $key rawX=${event.rawX} rawY=${event.rawY} dx=$dx dy=$dy")
 
                 // ignore too small first start moving(some time is click)
-                if (!dragging && dx*dx+dy*dy < 25) {
+                if (!dragging && dx*dx+dy*dy < touchSlopSquare) {
                     return false
                 }
 
@@ -456,14 +479,19 @@ class HQFloatingWindow(
                 // Throttle visual layout update and dragging event (max once every 16ms)
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastDragEmitTime >= 16) {
+                    dragHandler.removeCallbacks(dragRunnable)
                     if (_started) {
                         wm.updateViewLayout(view, layoutParams)
                     }
                     emit("dragging", listOf(constrainedX, constrainedY))
                     lastDragEmitTime = currentTime
+                } else {
+                    dragHandler.removeCallbacks(dragRunnable)
+                    dragHandler.postDelayed(dragRunnable, 16)
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                dragHandler.removeCallbacks(dragRunnable)
                 // touch end
                 if (dragging) {
                     // Ensure final position is applied and emitted before snapping
@@ -473,21 +501,9 @@ class HQFloatingWindow(
                     emit("dragging", listOf(layoutParams.x, layoutParams.y))
                     
                     if (config.magnet != false) {
-                        // magnet effect snapping to horizontal edge
-                        val targetX = if (layoutParams.x + wWidth / 2 < screenWidth / 2) 0 else (screenWidth - wWidth)
-                        val animator = android.animation.ValueAnimator.ofInt(layoutParams.x, targetX)
-                        animator.duration = (config.snapDuration ?: 250).toLong()
-                        animator.interpolator = getInterpolator(config.snapCurve)
-                        animator.addUpdateListener { valueAnimator ->
-                            val animX = valueAnimator.animatedValue as Int
-                            update(Config().apply { x = animX })
+                        performMagnetSnap(layoutParams.x, null, screenWidth, wWidth) { targetX ->
+                            emit("drag_end", listOf(targetX.toDouble(), layoutParams.y.toDouble()))
                         }
-                        animator.addListener(object : android.animation.AnimatorListenerAdapter() {
-                            override fun onAnimationEnd(animation: android.animation.Animator) {
-                                emit("drag_end", listOf(targetX.toDouble(), layoutParams.y.toDouble()))
-                            }
-                        })
-                        animator.start()
                     } else {
                         emit("drag_end", listOf(layoutParams.x.toDouble(), layoutParams.y.toDouble()))
                     }

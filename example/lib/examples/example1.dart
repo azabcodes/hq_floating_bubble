@@ -109,6 +109,9 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
   bool _repositionScheduled = false;
   late Offset offset = widget.initialOffset;
   late Offset largerOffset = offset;
+  late MediaQueryData _media;
+  int _lastDragUpdateTime = 0;
+  Timer? _dragThrottleTimer;
 
   static const Size size = Size(56, 56);
 
@@ -150,10 +153,10 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final mq = MediaQuery.of(context);
-    final currentSize = mq.size;
-    final currentPadding = mq.padding;
-    final currentViewInsets = mq.viewInsets;
+    _media = MediaQuery.of(context);
+    final currentSize = _media.size;
+    final currentPadding = _media.padding;
+    final currentViewInsets = _media.viewInsets;
 
     if (_lastScreenSize != currentSize ||
         _lastPadding != currentPadding ||
@@ -191,6 +194,7 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
   void dispose() {
     timer?.cancel();
     _focusDebounceTimer?.cancel();
+    _dragThrottleTimer?.cancel();
     FocusManager.instance.removeListener(listener);
     if (window != null) {
       if (_dragStartListener != null) {
@@ -213,10 +217,7 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
     _focusDebounceTimer?.cancel();
     _focusDebounceTimer = Timer(const Duration(milliseconds: 200), () {
       if (!mounted) return;
-      largerOffset = Offset(
-        max(largerOffset.dx, offset.dx),
-        max(largerOffset.dy, offset.dy),
-      );
+      largerOffset = offset;
 
       _setOffset(largerOffset, false);
     });
@@ -224,6 +225,7 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    _media = MediaQuery.of(context);
     Widget child = widget.child;
 
     child = GestureDetector(onTap: _onTap, child: child);
@@ -265,10 +267,25 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
   }
 
   void _onDragUpdate(int x, int y) {
-    _setOffset(Offset(x.toDouble(), y.toDouble()));
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final delta = now - _lastDragUpdateTime;
+    if (delta >= 16) {
+      _dragThrottleTimer?.cancel();
+      _setOffset(Offset(x.toDouble(), y.toDouble()));
+      _lastDragUpdateTime = now;
+    } else {
+      _dragThrottleTimer?.cancel();
+      _dragThrottleTimer = Timer(Duration(milliseconds: 16 - delta), () {
+        if (mounted) {
+          _setOffset(Offset(x.toDouble(), y.toDouble()));
+          _lastDragUpdateTime = DateTime.now().millisecondsSinceEpoch;
+        }
+      });
+    }
   }
 
   void _onDragEnd() {
+    _dragThrottleTimer?.cancel();
     if (!isDragging) return;
     setState(() {
       isDragging = false;
@@ -310,9 +327,8 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
   /// accounting for screen padding, view insets, margins, and the button's
   /// own measured size.
   ({double left, double top, double right, double bottom}) _bounds(Size screenSize) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenPadding = mediaQuery.padding;
-    final viewInsets = mediaQuery.viewInsets;
+    final screenPadding = _media.padding;
+    final viewInsets = _media.viewInsets;
     final left = screenPadding.left + viewInsets.left + widget.margin.left;
     final top = screenPadding.top + viewInsets.top + widget.margin.top;
     final right =
@@ -333,7 +349,7 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
   /// TODO: this function should depend on the gravity to calcute the position
   void _setOffset(Offset offset, [bool shouldUpdateLargerOffset = true]) {
     if (offset.dx.isInfinite || offset.dy.isInfinite) {
-      final screenSize = window?.system?.screenSize ?? MediaQuery.of(context).size;
+      final screenSize = window?.system?.screenSize ?? _media.size;
       offset = Offset(screenSize.width, screenSize.height / 2);
     }
 
@@ -346,7 +362,7 @@ class _AssistiveButtonState extends State<AssistiveButton> with SingleTickerProv
       return;
     }
 
-    final screenSize = window?.system?.screenSize ?? MediaQuery.of(context).size;
+    final screenSize = window?.system?.screenSize ?? _media.size;
     final b = _bounds(screenSize);
 
     final normalizedTop = max(min(offset.dy, b.bottom), b.top);
@@ -508,7 +524,7 @@ class _AssistivePannelState extends State<AssistivePannel> {
                                 action(
                                   Icons.close,
                                   'Close',
-                                  () => _bloc.add(ClosePannelRequested()),
+                                  () => _bloc.add(const ClosePannelRequested(force: true)),
                                 ),
                               ],
                             ),

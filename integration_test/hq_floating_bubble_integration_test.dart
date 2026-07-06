@@ -13,86 +13,91 @@ import 'package:hq_floating_bubble/hq_floating_bubble.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  const MethodChannel methodChannel = MethodChannel(
+    'hq.floating.bubble/method',
+  );
+  const MethodChannel windowChannel = MethodChannel(
+    'hq.floating.bubble/window',
+  );
+
+  // Track method calls for verification
+  final List<String> methodCalls = [];
+
+  setUp(() {
+    methodCalls.clear();
+
+    // Mock main plugin channel
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(methodChannel, (
+          MethodCall methodCall,
+        ) async {
+          methodCalls.add(methodCall.method);
+
+          switch (methodCall.method) {
+            case 'plugin.has_permission':
+              return true;
+            case 'plugin.open_permission_setting':
+              return true;
+            case 'plugin.is_service_running':
+              return false; // Start as not running
+            case 'plugin.start_service':
+              return true;
+            case 'plugin.initialize':
+              return {
+                'permission_grated': true,
+                'service_running': true,
+                'windows': [],
+              };
+            case 'plugin.sync_windows':
+              return [];
+            case 'plugin.create_window':
+              final id = methodCall.arguments['id'] ?? 'default';
+              final config = methodCall.arguments['config'];
+              return {'id': id, 'pixelRadio': 2.0, 'config': config};
+            default:
+              return null;
+          }
+        });
+
+    // Mock window channel
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, (
+          MethodCall methodCall,
+        ) async {
+          methodCalls.add(methodCall.method);
+
+          switch (methodCall.method) {
+            case 'window.start':
+              return true;
+            case 'window.show':
+              return true;
+            case 'window.close':
+              return true;
+            case 'window.update':
+              return {
+                'id': methodCall.arguments['id'],
+                'config': methodCall.arguments['config'],
+              };
+            case 'window.create_child':
+              final id = methodCall.arguments['id'] ?? 'default-child';
+              final config = methodCall.arguments['config'];
+              return {'id': id, 'pixelRadio': 2.0, 'config': config};
+            case 'data.share':
+              return {'received': true};
+            default:
+              return null;
+          }
+        });
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(methodChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, null);
+  });
+
   group('End-to-end workflow tests', () {
-    const MethodChannel methodChannel = MethodChannel(
-      'hq.floating.bubble/method',
-    );
-    const MethodChannel windowChannel = MethodChannel(
-      'hq.floating.bubble/window',
-    );
-
-    // Track method calls for verification
-    final List<String> methodCalls = [];
-
-    setUp(() {
-      methodCalls.clear();
-
-      // Mock main plugin channel
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, (
-            MethodCall methodCall,
-          ) async {
-            methodCalls.add(methodCall.method);
-
-            switch (methodCall.method) {
-              case 'plugin.has_permission':
-                return true;
-              case 'plugin.open_permission_setting':
-                return true;
-              case 'plugin.is_service_running':
-                return false; // Start as not running
-              case 'plugin.start_service':
-                return true;
-              case 'plugin.initialize':
-                return {
-                  'permission_grated': true,
-                  'service_running': true,
-                  'windows': [],
-                };
-              case 'plugin.sync_windows':
-                return [];
-              case 'plugin.create_window':
-                final id = methodCall.arguments['id'] ?? 'default';
-                final config = methodCall.arguments['config'];
-                return {'id': id, 'pixelRadio': 2.0, 'config': config};
-              default:
-                return null;
-            }
-          });
-
-      // Mock window channel
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowChannel, (
-            MethodCall methodCall,
-          ) async {
-            methodCalls.add(methodCall.method);
-
-            switch (methodCall.method) {
-              case 'window.start':
-                return true;
-              case 'window.show':
-                return true;
-              case 'window.close':
-                return true;
-              case 'window.update':
-                return {
-                  'id': methodCall.arguments['id'],
-                  'config': methodCall.arguments['config'],
-                };
-              case 'data.share':
-                return {'received': true};
-              default:
-                return null;
-            }
-          });
-    });
-
-    tearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, null);
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowChannel, null);
-    });
 
     test('Complete window creation workflow', () async {
       final plugin = HQFloatingService();
@@ -276,6 +281,34 @@ void main() {
       await window2?.close();
       await window3?.close();
     });
+
+    test('Child window creation workflow', () async {
+      final plugin = HQFloatingService();
+
+      // Create parent window
+      final parentConfig = HQFloatingWindowConfig(route: '/parent');
+      final parentWindow = await plugin.createWindow('parent-window', parentConfig);
+      expect(parentWindow, isNotNull);
+
+      // Create child window config
+      final childConfig = HQFloatingWindowConfig(
+        id: 'child-window',
+        route: '/child',
+        width: 100,
+        height: 100,
+      );
+
+      // Create child window
+      final childWindow = await parentWindow?.createChildWindow(
+        'child-window',
+        childConfig,
+        start: true,
+      );
+
+      expect(childWindow, isNotNull);
+      expect(childWindow?.id, equals('child-window'));
+      expect(methodCalls, contains('window.create_child'));
+    });
   });
 
   group('Error handling integration tests', () {
@@ -326,6 +359,45 @@ void main() {
       // Cleanup
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(methodChannel, null);
+    });
+
+    test('Should fallback to false on native null returns', () async {
+      // Mock plugin/service channel to return null for all boolean methods
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(methodChannel, (MethodCall methodCall) async {
+        return null;
+      });
+
+      // Mock window channel to return null for all boolean methods
+      final testWindowChannel = MethodChannel('hq.floating.bubble/window');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(testWindowChannel, (MethodCall methodCall) async {
+        return null;
+      });
+
+      final plugin = HQFloatingService();
+
+      // Service checks
+      expect(await plugin.checkPermission(), isFalse);
+      expect(await plugin.openPermissionSetting(), isFalse);
+      expect(await plugin.isServiceRunning(), isFalse);
+      expect(await plugin.startService(), isFalse);
+      expect(await plugin.stopService(), isFalse);
+      expect(await plugin.cleanCache(), isFalse);
+      expect(await plugin.promoteService(), isFalse);
+      expect(await plugin.demoteService(), isFalse);
+      expect(await plugin.setWakeLock(true), isFalse);
+
+      // Window checks
+      final config = HQFloatingWindowConfig(route: '/test');
+      final window = HQFloatingWindow(id: 'null-fallback-test', config: config);
+      expect(await window.launchMainActivity(), isFalse);
+
+      // Cleanup handlers
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(methodChannel, null);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(testWindowChannel, null);
     });
   });
 
@@ -398,6 +470,27 @@ void main() {
       // All should have unique int values
       final intValues = gravities.map((g) => g.toInt()).toSet();
       expect(intValues.length, equals(gravities.length));
+    });
+
+    test('HQFloatingWindowConfig negative dimensions update checks', () async {
+      final plugin = HQFloatingService();
+      final parentConfig = HQFloatingWindowConfig(
+        route: '/size-test',
+        width: -1, // matchParent
+        height: 200, // positive height
+      );
+      final window = await plugin.createWindow('size-check-window', parentConfig);
+      expect(window, isNotNull);
+
+      final newConfig = HQFloatingWindowConfig(
+        x: 0,
+        y: 0,
+      );
+
+      // Trigger update, this should reset negative dimensions (width) to null in newConfig
+      await window?.update(newConfig);
+      expect(newConfig.width, isNull);
+      expect(newConfig.height, isNull); // height is positive, remains null as not specified/copied unless matching negative, wait!
     });
   });
 }

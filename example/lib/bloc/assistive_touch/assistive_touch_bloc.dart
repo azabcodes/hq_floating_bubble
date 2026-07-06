@@ -17,6 +17,8 @@ class AssistiveTouchBloc extends Bloc<AssistiveTouchEvent, AssistiveTouchState> 
   HQFloatingWindowListener? _touchStartedListener;
   HQFloatingWindowListener? _pannelCreatedListener;
   HQFloatingWindowListener? _pannelPausedListener;
+  HQFloatingWindowListener? _pannelStartedListener;
+  Completer<void>? _pannelStartedCompleter;
 
   AssistiveTouchBloc() : super(const AssistiveTouchState()) {
     on<InitializeAssistiveTouch>(_onInitialize);
@@ -25,7 +27,8 @@ class AssistiveTouchBloc extends Bloc<AssistiveTouchEvent, AssistiveTouchState> 
     on<OpenPanelRequested>(_onOpenPanel);
   }
 
-  void _onInitialize(InitializeAssistiveTouch event, Emitter<AssistiveTouchState> emit) {
+  Future<void> _onInitialize(InitializeAssistiveTouch event, Emitter<AssistiveTouchState> emit) async {
+    if (touchWindow != null) return;
     touchWindow = event.touchWindow;
 
     _touchStartedListener = (window, data) {
@@ -41,8 +44,6 @@ class AssistiveTouchBloc extends Bloc<AssistiveTouchEvent, AssistiveTouchState> 
       autosize: false,
     ).to();
 
-    pannelWindow?.create();
-
     _pannelCreatedListener = (window, data) {
       add(const PanelReadyUpdated(true));
       if (!_pannelReadyCompleter.isCompleted) {
@@ -54,9 +55,35 @@ class AssistiveTouchBloc extends Bloc<AssistiveTouchEvent, AssistiveTouchState> 
       touchWindow?.start();
     };
 
+    _pannelStartedListener = (window, data) {
+      if (_pannelStartedCompleter != null && !_pannelStartedCompleter!.isCompleted) {
+        _pannelStartedCompleter!.complete();
+      }
+    };
+
     pannelWindow
         ?.on(HQFloatingEventType.WindowCreated, _pannelCreatedListener!)
-        .on(HQFloatingEventType.WindowPaused, _pannelPausedListener!);
+        .on(HQFloatingEventType.WindowPaused, _pannelPausedListener!)
+        .on(HQFloatingEventType.WindowStarted, _pannelStartedListener!);
+
+    print('[AssistiveTouchBloc] Syncing windows from native service...');
+    await HQFloatingService().syncWindows();
+
+    final existingWindow = HQFloatingService().windows['assistive_pannel'];
+    if (existingWindow != null) {
+      print('[AssistiveTouchBloc] Panel window already exists in cache. Marking as ready immediately.');
+      pannelWindow!.pixelRadio = existingWindow.pixelRadio;
+      pannelWindow!.system = existingWindow.system;
+      pannelWindow!.config = existingWindow.config;
+      
+      emit(state.copyWith(pannelReady: true));
+      if (!_pannelReadyCompleter.isCompleted) {
+        _pannelReadyCompleter.complete();
+      }
+    } else {
+      print('[AssistiveTouchBloc] Panel window not found in cache. Calling create().');
+      pannelWindow?.create();
+    }
   }
 
   void _onPanelReadyUpdated(PanelReadyUpdated event, Emitter<AssistiveTouchState> emit) {
@@ -71,39 +98,51 @@ class AssistiveTouchBloc extends Bloc<AssistiveTouchEvent, AssistiveTouchState> 
     OpenPanelRequested event,
     Emitter<AssistiveTouchState> emit,
   ) async {
-    if (state.opening) return;
+    print('[AssistiveTouchBloc] _onOpenPanel called, target coords: x=${event.x}, y=${event.y}, state.opening=${state.opening}');
+    if (state.opening) {
+      print('[AssistiveTouchBloc] Already opening panel, aborting');
+      return;
+    }
+    if (pannelWindow == null) {
+      print('[AssistiveTouchBloc] pannelWindow is null, aborting');
+      return;
+    }
 
     emit(state.copyWith(opening: true));
 
     try {
       if (!state.pannelReady) {
+        print('[AssistiveTouchBloc] Panel window is not ready, waiting for _pannelReadyCompleter...');
         await _pannelReadyCompleter.future;
+        print('[AssistiveTouchBloc] _pannelReadyCompleter completed, panel window is ready');
       }
 
-      final startedCompleter = Completer<void>();
-      void startedListener(window, data) {
-        if (!startedCompleter.isCompleted) {
-          startedCompleter.complete();
-        }
+      _pannelStartedCompleter = Completer<void>();
+
+      try {
+        print('[AssistiveTouchBloc] Calling native pannelWindow.start()...');
+        await pannelWindow?.start();
+
+        print('[AssistiveTouchBloc] Waiting for WindowStarted event callback (timeout 1s)...');
+        await Future.any([
+          _pannelStartedCompleter!.future,
+          Future.delayed(const Duration(seconds: 1)),
+        ]);
+        print('[AssistiveTouchBloc] Panel start await finished');
+      } finally {
+        _pannelStartedCompleter = null;
       }
 
-      pannelWindow?.on(HQFloatingEventType.WindowStarted, startedListener);
-
-      await pannelWindow?.start();
-
-      await Future.any([
-        startedCompleter.future,
-        Future.delayed(const Duration(milliseconds: 500)),
-      ]);
-
-      pannelWindow?.off(HQFloatingEventType.WindowStarted, startedListener);
-
+      print('[AssistiveTouchBloc] Sharing touch coordinates via pannelWindow.share()');
       await pannelWindow?.share([
         event.x,
         event.y,
       ]);
 
+      print('[AssistiveTouchBloc] Panel expanded successfully');
       emit(state.copyWith(expend: true));
+    } catch (e, st) {
+      print('[AssistiveTouchBloc] Error opening panel: $e\n$st');
     } finally {
       emit(state.copyWith(opening: false));
     }
@@ -120,6 +159,9 @@ class AssistiveTouchBloc extends Bloc<AssistiveTouchEvent, AssistiveTouchState> 
       }
       if (_pannelPausedListener != null) {
         pannelWindow!.off(HQFloatingEventType.WindowPaused, _pannelPausedListener!);
+      }
+      if (_pannelStartedListener != null) {
+        pannelWindow!.off(HQFloatingEventType.WindowStarted, _pannelStartedListener!);
       }
     }
     return super.close();

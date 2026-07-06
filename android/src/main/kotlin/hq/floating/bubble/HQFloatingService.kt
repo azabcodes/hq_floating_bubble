@@ -189,13 +189,15 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         }
         "service.create_window" -> {
             val id = call.argument<String>("id") ?: "default"
-            val cfg = call.argument<Map<String, *>>("config")!!
+            val cfg = call.argument<Map<String, *>>("config")
+                ?: return result.error("invalid_args", "Missing config argument", null)
             val start = call.argument<Boolean>("start") ?: false
             Log.d(TAG, "[service] window.create request_id: $id")
             result.success(createWindow(mContext, id, HQFloatingWindow.Config.from(cfg), start, null))
         }
         "window.close" -> {
-            val id = call.argument<String>("id")!!
+            val id = call.argument<String>("id")
+                ?: return result.error("invalid_args", "Missing id argument", null)
             Log.d(TAG, "[service] window.close request_id: $id")
             val force = call.argument("force") ?: false
             result.success(windows[id]?.destroy(force))
@@ -206,15 +208,19 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
             result.success(windows[id]?.start())
         }
         "window.show" -> {
-            val id = call.argument<String>("id")!!
+            val id = call.argument<String>("id")
+                ?: return result.error("invalid_args", "Missing id argument", null)
             val visible = call.argument("visible") ?: true
             Log.d(TAG, "[service] window.show request_id: $id")
             result.success(windows[id]?.setVisible(visible))
         }
         "window.update" -> {
-            val id = call.argument<String>("id")!!
+            val id = call.argument<String>("id")
+                ?: return result.error("invalid_args", "Missing id argument", null)
+            val cfg = call.argument<Map<String, *>>("config")
+                ?: return result.error("invalid_args", "Missing config argument", null)
             Log.d(TAG, "[service] window.update request_id: $id")
-            val config = HQFloatingWindow.Config.from(call.argument<Map<String, *>>("config")!!)
+            val config = HQFloatingWindow.Config.from(cfg)
             result.success(windows[id]?.update(config))
         }
         "window.sync" -> {
@@ -321,97 +327,96 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
 
     private fun createWindow(id: String, config: HQFloatingWindow.Config, start: Boolean = false,
         p: HQFloatingWindow?): Map<String, Any?>? {
-        startingWindowId = id
-        startingWindowConfig = config
-        try {
-            // check if id exits
+        synchronized(windows) {
             if (windows.containsKey(id)) {
-                Log.e(TAG, "[service] window with id $id exits")
+                Log.e(TAG, "[service] window with id $id exists")
                 return null
             }
+            startingWindowId = id
+            startingWindowConfig = config
+            try {
+                // get flutter engine
+                val fKey = id.flutterKey()
+                val (eng, fromCache) = getFlutterEngine(fKey, config.entry, config.route, config.callback)
 
-            // get flutter engine
-            val fKey = id.flutterKey()
-            val (eng, fromCache) = getFlutterEngine(fKey, config.entry, config.route, config.callback)
-
-            val svc = this
-            return HQFloatingWindow(mContext, windowManager, fKey, eng, config).apply {
-                key = id
-                service = svc
-                parent = p
-                Log.d(TAG, "[service] set window as handler $METHOD_CHANNEL/window for $eng")
-            }.init().also {
-                Log.d(TAG, "[service] created window: $id $config")
-                it.emit("created", !fromCache)
-                windows[it.key] = it
-                if (start) it.start()
-            }.toMap()
-        } finally {
-            startingWindowId = null
-            startingWindowConfig = null
+                val svc = this
+                return HQFloatingWindow(mContext, windowManager, fKey, eng, config).apply {
+                    key = id
+                    service = svc
+                    parent = p
+                    Log.d(TAG, "[service] set window as handler $METHOD_CHANNEL/window for $eng")
+                }.init().also {
+                    Log.d(TAG, "[service] created window: $id $config")
+                    it.emit("created", !fromCache)
+                    windows[it.key] = it
+                    if (start) it.start()
+                }.toMap()
+            } finally {
+                startingWindowId = null
+                startingWindowConfig = null
+            }
         }
     }
 
     // this function is useful when we want to start service automatically
     private  fun getFlutterEngine(key: String, entryName: String?, route: String?, callback: Long?): Pair<FlutterEngine, Boolean> {
-        // first take from cache
-        var eng = FlutterEngineCache.getInstance().get(key)
-        if (eng != null) {
-            Log.i(TAG, "[service] use the flutter exits in cache, id: $key")
-            return Pair(eng, true)
-        }
+        val cache = FlutterEngineCache.getInstance()
+        synchronized(cache) {
+            // first take from cache
+            var eng = cache.get(key)
+            if (eng != null) {
+                Log.i(TAG, "[service] use the flutter exits in cache, id: $key")
+                return Pair(eng, true)
+            }
 
-        Log.d(TAG, "[service] miss from cache need to create a new flutter engine")
+            Log.d(TAG, "[service] miss from cache need to create a new flutter engine")
 
-        // then create a flutter engine
+            // then create a flutter engine
 
-        // ensure initialization
-        // FlutterInjector.instance().flutterLoader().startInitialization(mContext)
-        // FlutterInjector.instance().flutterLoader().ensureInitializationComplete(mContext, arrayOf())
+            // first let's use callback to start engine first
+            if (callback != null && callback != 0L) {
+                Log.i(TAG, "[service] start flutter engine, id: $key callback: $callback")
 
-        // first let's use callback to start engine first
-        if (callback != null && callback != 0L) {
-            Log.i(TAG, "[service] start flutter engine, id: $key callback: $callback")
+                eng = FlutterEngine(mContext)
+                val info = FlutterCallbackInformation.lookupCallbackInformation(callback)
+                val args = DartExecutor.DartCallback(mContext.assets, FlutterInjector.instance().flutterLoader().findAppBundlePath(), info)
+                // execute the callback function
+                eng.dartExecutor.executeDartCallback(args)
 
-            eng = FlutterEngine(mContext)
-            val info = FlutterCallbackInformation.lookupCallbackInformation(callback)
-            val args = DartExecutor.DartCallback(mContext.assets, FlutterInjector.instance().flutterLoader().findAppBundlePath(), info)
-            // execute the callback function
-            eng.dartExecutor.executeDartCallback(args)
+                // store the engine to cache
+                cache.put(key, eng)
+                createdEngineKeys.add(key)
+
+                return Pair(eng, false)
+            }
+
+            var entry = entryName
+            if (entry==null) {
+                // try use the main entrypoint
+                entry = "main"
+                Log.w(TAG, "[service] recommend to use a entrypoint")
+            }
+
+            // check the main and default route
+            if (entry == "main" && route == null) {
+                Log.w(TAG, "[service] use the main entrypoint and default route")
+            }
+
+            Log.i(TAG, "[service] start flutter engine, id: $key entrypoint: $entry, route: $route")
+
+            // make sure the entrypoint exits
+            val entrypoint = DartExecutor.DartEntrypoint(
+                FlutterInjector.instance().flutterLoader().findAppBundlePath(), entry)
+
+            // start the dart executor with special entrypoint
+            eng = engGroup.createAndRunEngine(mContext, entrypoint, route)
 
             // store the engine to cache
-            FlutterEngineCache.getInstance().put(key, eng)
+            cache.put(key, eng)
             createdEngineKeys.add(key)
 
             return Pair(eng, false)
         }
-
-        var entry = entryName
-        if (entry==null) {
-            // try use the main entrypoint
-            entry = "main"
-            Log.w(TAG, "[service] recommend to use a entrypoint")
-        }
-
-        // check the main and default route
-        if (entry == "main" && route == null) {
-            Log.w(TAG, "[service] use the main entrypoint and default route")
-        }
-
-        Log.i(TAG, "[service] start flutter engine, id: $key entrypoint: $entry, route: $route")
-
-        // make sure the entrypoint exits
-        val entrypoint = DartExecutor.DartEntrypoint(
-            FlutterInjector.instance().flutterLoader().findAppBundlePath(), entry)
-
-        // start the dart executor with special entrypoint
-        eng = engGroup.createAndRunEngine(mContext, entrypoint, route)
-
-        // store the engine to cache
-        FlutterEngineCache.getInstance().put(key, eng)
-        createdEngineKeys.add(key)
-
-        return Pair(eng, false)
     }
 
     // window engine won't call this, so just window method
@@ -595,7 +600,7 @@ class HQFloatingService : MethodChannel.MethodCallHandler, BasicMessageChannel.M
         }
 
         fun isRunning(context: Context): Boolean {
-            return instance != null && instance?.windows != null
+            return instance != null
         }
 
         fun start(context: Context): Boolean {

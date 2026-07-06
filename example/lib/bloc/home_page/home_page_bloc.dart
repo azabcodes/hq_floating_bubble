@@ -7,6 +7,7 @@ part 'home_page_event.dart';
 part 'home_page_state.dart';
 
 class HomePageBloc extends Bloc<HomePageEvent, HomePageState> {
+  static bool forceKillOnStartup = false;
   List<HQFloatingWindowConfig> _configs = const [];
 
   HomePageBloc() : super(const HomePageState()) {
@@ -35,9 +36,7 @@ class HomePageBloc extends Bloc<HomePageEvent, HomePageState> {
 
   Future<void> _initializeFlow(Emitter<HomePageState> emit) async {
     try {
-      // Force kill the background service on startup/hot-restart during development
-      // to ensure all sub-engine isolates are recreated with fresh code.
-      if (kDebugMode) {
+      if (kDebugMode && forceKillOnStartup) {
         try {
           await HQFloatingService().stopService();
         } catch (_) {}
@@ -67,13 +66,10 @@ class HomePageBloc extends Bloc<HomePageEvent, HomePageState> {
         windows.add(c.to());
       }
 
-      emit(state.copyWith(
-        windows: windows,
-        hasPermission: true,
-      ));
-
-      // Attempt to create windows
+      // Attempt to create windows in parallel
       final Map<String, bool> readys = Map.from(state.readys);
+      final List<Future<void>> createFutures = [];
+
       for (int i = 0; i < windows.length; i++) {
         final w = windows[i];
         final existing = HQFloatingService().windows[w.id];
@@ -83,15 +79,22 @@ class HomePageBloc extends Bloc<HomePageEvent, HomePageState> {
           continue;
         }
 
-        try {
-          final createdWindow = await w.create();
-          if (createdWindow != null) {
-            windows[i] = createdWindow;
-            readys[createdWindow.id] = true;
+        final index = i;
+        createFutures.add(() async {
+          try {
+            final createdWindow = await w.create();
+            if (createdWindow != null) {
+              windows[index] = createdWindow;
+              readys[createdWindow.id] = true;
+            }
+          } catch (e, st) {
+            debugPrint('Failed to create window "${w.id}": $e\n$st');
           }
-        } catch (e, st) {
-          debugPrint('Failed to create window "${w.id}": $e\n$st');
-        }
+        }());
+      }
+
+      if (createFutures.isNotEmpty) {
+        await Future.wait(createFutures);
       }
 
       emit(state.copyWith(
@@ -99,6 +102,7 @@ class HomePageBloc extends Bloc<HomePageEvent, HomePageState> {
         ready: true,
         windows: windows,
         readys: readys,
+        hasPermission: true,
       ));
     } catch (e, st) {
       debugPrint('Failed to initialize floating overlays: $e\n$st');

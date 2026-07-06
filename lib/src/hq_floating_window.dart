@@ -154,12 +154,10 @@ class HQFloatingWindow {
 
   Future<bool> update(HQFloatingWindowConfig cfg) async {
     // update window with config, config con't update with id, entry, route
-    var size = config?.size;
-    if (size != null && size < Size.zero) {
-      // special case, should updated
-      cfg.width = null;
-      cfg.height = null;
-    }
+    final w = config?.width;
+    final h = config?.height;
+    if (w != null && w < 0) cfg.width = null;
+    if (h != null && h < 0) cfg.height = null;
     var updates = await _channel.invokeMapMethod('window.update', {
       'id': id,
       // don't set pixelRadio
@@ -190,6 +188,7 @@ class HQFloatingWindow {
   Future<dynamic> share(dynamic data, {String name = 'default'}) async {
     var map = {};
     map['target'] = id;
+    map['id'] = id;
     map['data'] = data;
     map['name'] = name;
     // make sure data is serialized
@@ -203,7 +202,7 @@ class HQFloatingWindow {
 
   /// launch main activity
   Future<bool> launchMainActivity() async {
-    return await _channel.invokeMethod('window.launch_main');
+    return (await _channel.invokeMethod<bool>('window.launch_main')) ?? false;
   }
 
   /// on data to receive data from other shared

@@ -145,9 +145,9 @@ void main() {
   group('HQFloatingWindowListener typedef', () {
     test('should accept correct function signature', () {
       // HQFloatingWindowListener = dynamic Function(HQFloatingWindow window, dynamic data)
-      HQFloatingWindowListener listener = (HQFloatingWindow w, dynamic data) {
+      listener(HQFloatingWindow w, dynamic data) {
         return 'handled';
-      };
+      }
 
       final window = HQFloatingWindow(id: 'test');
       final result = listener(window, {'event': 'data'});
@@ -156,10 +156,10 @@ void main() {
     });
 
     test('should work with async handlers', () async {
-      HQFloatingWindowListener asyncListener = (HQFloatingWindow w, dynamic data) async {
+      asyncListener(HQFloatingWindow w, dynamic data) async {
         await Future.delayed(Duration(milliseconds: 10));
         return 'async handled';
-      };
+      }
 
       final window = HQFloatingWindow(id: 'test');
       final result = await asyncListener(window, null);
@@ -168,9 +168,9 @@ void main() {
     });
 
     test('should allow void return', () {
-      HQFloatingWindowListener voidListener = (HQFloatingWindow w, dynamic data) {
+      voidListener(HQFloatingWindow w, dynamic data) {
         // No return
-      };
+      }
 
       final window = HQFloatingWindow(id: 'test');
       final result = voidListener(window, null);

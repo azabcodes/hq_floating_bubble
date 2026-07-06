@@ -26,10 +26,15 @@ class PannelTouchPositionUpdated extends AssistivePannelEvent {
   List<Object?> get props => [x, y];
 }
 
-class PannelStarted extends AssistivePannelEvent {}
-
-class PannelResumed extends AssistivePannelEvent {}
+class PannelVisible extends AssistivePannelEvent {}
 
 class EnableTapOutside extends AssistivePannelEvent {}
 
-class ClosePannelRequested extends AssistivePannelEvent {}
+class ClosePannelRequested extends AssistivePannelEvent {
+  final bool force;
+
+  const ClosePannelRequested({this.force = false});
+
+  @override
+  List<Object?> get props => [force];
+}

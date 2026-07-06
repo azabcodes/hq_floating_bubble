@@ -15,7 +15,7 @@ fi
 > "$OUTPUT_FILE"
 
 echo "=============================" >> "$OUTPUT_FILE"
-echo "  Kotlin files collection" >> "$OUTPUT_FILE"
+echo "  Code files collection" >> "$OUTPUT_FILE"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')" >> "$OUTPUT_FILE"
 echo "=============================" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"

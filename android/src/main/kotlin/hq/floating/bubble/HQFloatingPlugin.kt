@@ -121,8 +121,8 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
   private fun savePixelRadio(pixelRadio: Double): Boolean {
     val old = mContext.getSharedPreferences(SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE)
       .getFloat(PIXEL_RADIO_KEY, 0F)
-    if (old > 1F) {
-      Log.d(TAG, "[plugin] pixel radio already exits")
+    if (java.lang.Math.abs(old - pixelRadio.toFloat()) < 0.01f) {
+      Log.d(TAG, "[plugin] pixel radio already exists and is up to date")
       return false
     }
 
@@ -217,10 +217,10 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
       "plugin.grant_permission" -> {
         return grantPermission(result)
       }
-      // remove
       "plugin.create_window" -> {
         val id = call.argument<String>("id") ?: "default"
-        val cfg = call.argument<Map<String, *>>("config")!!
+        val cfg = call.argument<Map<String, *>>("config")
+          ?: return result.error("invalid_args", "Missing config argument", null)
         val start = call.argument<Boolean>("start") ?: false
         val config = HQFloatingWindow.Config.from(cfg)
         
@@ -267,6 +267,7 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
 
     myEngine = null
     myConfig = null
+    waitPermissionResult = null
   }
 
   override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -281,18 +282,24 @@ class HQFloatingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginR
   }
 
   override fun onDetachedFromActivityForConfigChanges() {
-    HQFloatingService.activityRef?.clear()
-    HQFloatingService.activityRef = null
+    if (isMain) {
+      HQFloatingService.activityRef?.clear()
+      HQFloatingService.activityRef = null
+    }
   }
 
   override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
     mActivity = binding.activity
-    HQFloatingService.onActivityAttached(mActivity)
+    if (isMain) {
+      HQFloatingService.onActivityAttached(mActivity)
+    }
   }
 
   override fun onDetachedFromActivity() {
-    HQFloatingService.activityRef?.clear()
-    HQFloatingService.activityRef = null
+    if (isMain) {
+      HQFloatingService.activityRef?.clear()
+      HQFloatingService.activityRef = null
+    }
   }
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {

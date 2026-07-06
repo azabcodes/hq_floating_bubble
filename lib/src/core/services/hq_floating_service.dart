@@ -160,27 +160,27 @@ class HQFloatingService {
   }
 
   Future<bool> checkPermission() async {
-    return await _channel.invokeMethod('plugin.has_permission');
+    return (await _channel.invokeMethod<bool>('plugin.has_permission')) ?? false;
   }
 
   Future<bool> openPermissionSetting() async {
-    return await _channel.invokeMethod('plugin.open_permission_setting');
+    return (await _channel.invokeMethod<bool>('plugin.open_permission_setting')) ?? false;
   }
 
   Future<bool> isServiceRunning() async {
-    return await _channel.invokeMethod('plugin.is_service_running');
+    return (await _channel.invokeMethod<bool>('plugin.is_service_running')) ?? false;
   }
 
   Future<bool> startService() async {
-    return await _channel.invokeMethod('plugin.start_service');
+    return (await _channel.invokeMethod<bool>('plugin.start_service')) ?? false;
   }
 
   Future<bool> stopService() async {
-    return await _channel.invokeMethod('service.stop_service');
+    return (await _channel.invokeMethod<bool>('service.stop_service')) ?? false;
   }
 
   Future<bool> cleanCache() async {
-    return await _channel.invokeMethod('plugin.clean_cache');
+    return (await _channel.invokeMethod<bool>('plugin.clean_cache')) ?? false;
   }
 
   /// Promote the background service to a foreground service with custom notification info.
@@ -192,24 +192,24 @@ class HQFloatingService {
     String? ticker,
     String? subText,
   }) async {
-    return await _channel.invokeMethod('service.promote', {
+    return (await _channel.invokeMethod<bool>('service.promote', {
       'title': title,
       'description': description,
       'icon': icon,
       'showWhen': showWhen,
       'ticker': ticker,
       'subText': subText,
-    });
+    })) ?? false;
   }
 
   /// Demote the foreground service back to background.
   Future<bool> demoteService() async {
-    return await _channel.invokeMethod('service.demote');
+    return (await _channel.invokeMethod<bool>('service.demote')) ?? false;
   }
 
   /// Control whether the foreground service holds system WakeLock.
   Future<bool> setWakeLock(bool enabled) async {
-    return await _channel.invokeMethod('service.set_wakelock', {'enabled': enabled});
+    return (await _channel.invokeMethod<bool>('service.set_wakelock', {'enabled': enabled})) ?? false;
   }
 
   /// create window to create a window

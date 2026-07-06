@@ -11,52 +11,56 @@ void main() {
     );
 
     setUp(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, (
-            MethodCall methodCall,
-          ) async {
-            switch (methodCall.method) {
-              case 'plugin.has_permission':
-                return true;
-              case 'plugin.open_permission_setting':
-                return true;
-              case 'plugin.is_service_running':
-                return true;
-              case 'plugin.start_service':
-                return true;
-              case 'plugin.clean_cache':
-                return true;
-              case 'plugin.initialize':
-                return {
-                  'permission_grated': true,
-                  'service_running': true,
-                  'windows': [],
-                };
-              case 'plugin.sync_windows':
-                return [
-                  {
-                    'id': 'window-1',
-                    'config': {'entry': 'main', 'route': '/test'},
-                  },
-                  {
-                    'id': 'window-2',
-                    'config': {'entry': 'main', 'route': '/test2'},
-                  },
-                ];
-              case 'plugin.create_window':
-                return {
-                  'id': methodCall.arguments['id'] ?? 'default',
-                  'config': methodCall.arguments['config'],
-                };
-              default:
-                return null;
-            }
-          });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        methodChannel,
+        (
+          MethodCall methodCall,
+        ) async {
+          switch (methodCall.method) {
+            case 'plugin.has_permission':
+              return true;
+            case 'plugin.open_permission_setting':
+              return true;
+            case 'plugin.is_service_running':
+              return true;
+            case 'plugin.start_service':
+              return true;
+            case 'plugin.clean_cache':
+              return true;
+            case 'plugin.initialize':
+              return {
+                'permission_grated': true,
+                'service_running': true,
+                'windows': [],
+              };
+            case 'plugin.sync_windows':
+              return [
+                {
+                  'id': 'window-1',
+                  'config': {'entry': 'main', 'route': '/test'},
+                },
+                {
+                  'id': 'window-2',
+                  'config': {'entry': 'main', 'route': '/test2'},
+                },
+              ];
+            case 'plugin.create_window':
+              return {
+                'id': methodCall.arguments['id'] ?? 'default',
+                'config': methodCall.arguments['config'],
+              };
+            default:
+              return null;
+          }
+        },
+      );
     });
 
     tearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, null);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        methodChannel,
+        null,
+      );
     });
 
     test('should be a singleton', () {
@@ -179,47 +183,58 @@ void main() {
     );
 
     test('should handle permission denied', () async {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, (
-            MethodCall methodCall,
-          ) async {
-            if (methodCall.method == 'plugin.has_permission') {
-              return false;
-            }
-            return null;
-          });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        methodChannel,
+        (
+          MethodCall methodCall,
+        ) async {
+          if (methodCall.method == 'plugin.has_permission') {
+            return false;
+          }
+          return null;
+        },
+      );
 
       final result = await HQFloatingService().checkPermission();
 
       expect(result, isFalse);
 
       // Cleanup
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, null);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        methodChannel,
+        null,
+      );
     });
 
-    test('createWindow should throw HQFloatingPermissionException when permission denied', () async {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, (
+    test(
+      'createWindow should throw HQFloatingPermissionException when permission denied',
+      () async {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          methodChannel,
+          (
             MethodCall methodCall,
           ) async {
             if (methodCall.method == 'plugin.has_permission') {
               return false;
             }
             return null;
-          });
+          },
+        );
 
-      final config = HQFloatingWindowConfig(route: '/test');
+        final config = HQFloatingWindowConfig(route: '/test');
 
-      expect(
-        () => HQFloatingService().createWindow('test', config),
-        throwsA(isA<HQFloatingPermissionException>()),
-      );
+        expect(
+          () => HQFloatingService().createWindow('test', config),
+          throwsA(isA<HQFloatingPermissionException>()),
+        );
 
-      // Cleanup
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(methodChannel, null);
-    });
+        // Cleanup
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          methodChannel,
+          null,
+        );
+      },
+    );
 
     test('event stream should broadcast events globally and window-specific', () async {
       final config = HQFloatingWindowConfig(route: '/test');
@@ -241,7 +256,10 @@ void main() {
       });
 
       // Sink event into EventManager
-      final msgChannel = BasicMessageChannel<dynamic>('hq.floating.bubble/window_msg', JSONMessageCodec());
+      final msgChannel = BasicMessageChannel<dynamic>(
+        'hq.floating.bubble/window_msg',
+        JSONMessageCodec(),
+      );
       final manager = EventManager(msgChannel);
       manager.sink(testEvent);
 

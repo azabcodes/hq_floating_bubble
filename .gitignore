@@ -31,3 +31,12 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
+
+# Script Dumps & Output Files
+*dump.txt
+*_dump.txt
+/scripts/
+
+# Flutter / Dart caches
+.flutter-plugins
+.packages

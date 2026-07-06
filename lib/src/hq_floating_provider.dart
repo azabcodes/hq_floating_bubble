@@ -58,7 +58,9 @@ class _HQFloatingContainerState extends State<HQFloatingContainer> {
       log('[provider] have not sync window at init, need to do at here');
       final win = await HQFloatingService().ensureWindow();
       if (!mounted) return;
-      _window = win;
+      setState(() {
+        _window = win;
+      });
     }
     await _changed();
 

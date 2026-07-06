@@ -1,16 +1,11 @@
-## 0.0.5
-
-* Implemented major performance, layout, and BLoC architecture optimizations:
-  * Refactored example app state management to follow professional BLoC architecture, separating Touch, Panel, and Home into distinct events, states, and blocs.
-  * Simplified `AssistiveButton` layout logic to use standard const `56x56` size, eliminating dynamic `RenderBox` bounds check overhead and listener leaks.
-  * Added auto-repositioning support for screen rotation and keyboard-safe view padding/insets changes.
-  * Throttled native gesture movement coordinates update updates in `ACTION_MOVE` to at most once per 16ms to drastically lower CPU consumption.
-  * Prevented redundant WindowManager layout redraw updates when bounds/dimensions are unchanged on update.
-  * Added safe animation cancels inside window destruction to prevent late anim callbacks.
-  * Added clean `offData` listener release method inside `HQFloatingWindow` and integrated it in BLoCs.
-
 ## 0.0.4
 
+* Fixed multiple gesture, event routing, and state issues:
+  * Resolved wobbly finger taps on high-density screens being wrongly intercepted as drag gestures by replacing the static 5px drag threshold with Android's `scaledTouchSlop`.
+  * Fixed native child window event distribution where event payloads were sent with the parent window's ID instead of the actual child emitting window's ID.
+  * Bypassed the native `subscribedEvents` map check to ensure all window events are successfully dispatched to the window's own isolate.
+  * Resolved a BLoC state race condition where rapid consecutive `PannelVisible` events cancelled the active safety timer, leaving `canTapOutside` locked at `false`.
+  * Added a `force` flag to `ClosePannelRequested` to immediately close the menu when clicking the Close button, bypassing any tap-outside safety delay.
 * Implemented stability & memory management updates on the native Android (Kotlin) layer:
   * Prevented Activity memory leaks using `WeakReference<Activity>`.
   * Resolved overlay request race conditions in `waitPermissionResult`.
@@ -19,6 +14,14 @@
   * Wrapped overlay view removal in try-catch to prevent layout detachment crashes.
   * Added safety type conversion for all parameters sent from Dart to prevent conversion crashes.
   * Prevented event filter bypasses and resolved concurrent modification exceptions in window lifecycle lists.
+* Implemented major performance, layout, and BLoC architecture optimizations:
+  * Refactored example app state management to follow professional BLoC architecture, separating Touch, Panel, and Home into distinct events, states, and blocs.
+  * Simplified `AssistiveButton` layout logic to use standard const `56x56` size, eliminating dynamic `RenderBox` bounds check overhead and listener leaks.
+  * Added auto-repositioning support for screen rotation and keyboard-safe view padding/insets changes.
+  * Throttled native gesture movement coordinates update updates in `ACTION_MOVE` to at most once per 16ms to drastically lower CPU consumption.
+  * Prevented redundant WindowManager layout redraw updates when bounds/dimensions are unchanged on update.
+  * Added safe animation cancels inside window destruction to prevent late anim callbacks.
+  * Added clean `offData` listener release method inside `HQFloatingWindow` and integrated it in BLoCs.
 
 ## 0.0.3
 

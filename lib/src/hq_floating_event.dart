@@ -40,16 +40,25 @@ class EventManager {
     // w.id -> type -> w -> [cb]
 
     // Broadcast globally
-    HQFloatingService().eventController.add(evt);
+    try {
+      HQFloatingService().eventController.add(evt);
+    } catch (e, st) {
+      print('Failed to add event to global eventController: $e\n$st');
+    }
 
     // Broadcast to the specific window if it exists
     final window = HQFloatingService().windows[evt.id];
     if (window != null) {
-      window.eventController.add(evt);
+      try {
+        window.eventController.add(evt);
+      } catch (e, st) {
+        print('Failed to add event to window eventController: $e\n$st');
+      }
     }
 
     // get windows
     var ws = (_listeners[evt.id] ?? {})[evt.name] ?? {};
+    print('[EventManager] sink event: id=${evt.id}, name=${evt.name}, handlers found=${ws.length}, all listeners keys=${_listeners.keys.toList()}');
     ws.forEach((w, cbs) {
       for (var c in (cbs)) {
         res.add(c(w, evt.data));
@@ -64,7 +73,7 @@ class EventManager {
     HQFloatingWindowListener callback,
   ) {
     var key = type.name;
-    log('[event] register listener $key for $window');
+    print('[EventManager] register listener: key=$key for window=${window.id}, instance=$window');
     
     if (_windows[window.id] == null) _windows[window.id] = [];
     if (!_windows[window.id]!.contains(window)) {

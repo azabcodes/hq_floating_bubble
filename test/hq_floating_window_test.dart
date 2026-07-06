@@ -133,41 +133,45 @@ void main() {
     );
 
     setUp(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowChannel, (
-            MethodCall methodCall,
-          ) async {
-            switch (methodCall.method) {
-              case 'window.show':
-                return true;
-              case 'window.close':
-                return true;
-              case 'window.start':
-                return true;
-              case 'window.update':
-                return {
-                  'id': methodCall.arguments['id'],
-                  'config': methodCall.arguments['config'],
-                };
-              case 'data.share':
-                return 'shared';
-              case 'window.launch_main':
-                return true;
-              case 'window.sync':
-                return {
-                  'id': 'synced-window',
-                  'pixelRadio': 2.0,
-                  'config': {'entry': 'main', 'route': '/synced'},
-                };
-              default:
-                return null;
-            }
-          });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        windowChannel,
+        (
+          MethodCall methodCall,
+        ) async {
+          switch (methodCall.method) {
+            case 'window.show':
+              return true;
+            case 'window.close':
+              return true;
+            case 'window.start':
+              return true;
+            case 'window.update':
+              return {
+                'id': methodCall.arguments['id'],
+                'config': methodCall.arguments['config'],
+              };
+            case 'data.share':
+              return 'shared';
+            case 'window.launch_main':
+              return true;
+            case 'window.sync':
+              return {
+                'id': 'synced-window',
+                'pixelRadio': 2.0,
+                'config': {'entry': 'main', 'route': '/synced'},
+              };
+            default:
+              return null;
+          }
+        },
+      );
     });
 
     tearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowChannel, null);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        windowChannel,
+        null,
+      );
     });
 
     test('hide should call show with visible=false', () async {

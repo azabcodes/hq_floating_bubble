@@ -1,6 +1,6 @@
 name: hq_floating_bubble
 description: A customizable Flutter plugin for creating system-level floating overlay windows (bubbles) on Android with magnet snapping and event streams.
-version: 0.0.5
+version: 0.0.4
 homepage: "https://github.com/azabcodes/hq_floating_bubble"
 
 environment:
@@ -14,6 +14,8 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 
